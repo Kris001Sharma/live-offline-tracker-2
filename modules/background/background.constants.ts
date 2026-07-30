@@ -1,0 +1,1 @@
+export const BACKGROUND_EXECUTION_VERSION = '1.0.0';

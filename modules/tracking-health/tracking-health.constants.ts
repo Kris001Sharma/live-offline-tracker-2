@@ -1,0 +1,3 @@
+export const TRACKING_HEALTH_VERSION = '1.0.0';
+export const MAX_CONSECUTIVE_FAILURES = 3;
+export const HEALTHY_TICK_MULTIPLIER = 2;

@@ -1,0 +1,6 @@
+{
+  "name": "Sapana Live Tracker",
+  "description": "An offline-first workforce location tracking platform designed for field teams operating in areas with intermittent or no internet connectivity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

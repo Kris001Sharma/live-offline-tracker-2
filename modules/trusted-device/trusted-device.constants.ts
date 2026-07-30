@@ -1,0 +1,1 @@
+export const TRUSTED_DEVICE_ENGINE_VERSION = '1.0.0';
