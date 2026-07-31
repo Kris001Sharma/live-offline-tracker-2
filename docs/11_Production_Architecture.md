@@ -319,3 +319,12 @@ Following this freeze, modifications to backend modules are strictly restricted 
 Any structural modification or API contract change requires an approved **Architecture Decision Record (ADR)** prior to implementation.
 
 
+
+
+## Application Lifecycle
+
+- The Application Shell owns the lifecycle exclusively (`src/shell/lifecycle`).
+- The lifecycle model manages only high-level application states (`NOT_INITIALIZED`, `INITIALIZING`, `READY`, `ERROR`).
+- Engine initialization updates the lifecycle state during bootstrap.
+- Consumers may READ lifecycle state through the public API (`useApplicationLifecycle`) but may NOT mutate it.
+- Feature components must not own, initialize, or anticipate lifecycle details.

@@ -1,46 +1,8 @@
-import { useEffect, useState } from 'react';
-import { ConfigurationEngine } from '../modules/configuration';
-import { StorageEngine, CapacitorSQLiteAdapter } from '../modules/storage';
-import { ConnectivityEngine } from '../modules/connectivity';
-import { AuthenticationEngine } from '../modules/authentication';
-import { UserContextEngine } from '../modules/user-context';
-import { WorkerProfileEngine } from '../modules/worker-profile';
+import { ApplicationLifecycleProvider, useApplicationLifecycle, useLifecycleBootstrap } from './shell';
 
-type BootstrapState = 'INITIALIZING' | 'READY' | 'ERROR';
-
-export default function App() {
-  const [bootstrapState, setBootstrapState] = useState<BootstrapState>('INITIALIZING');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const initializeBackend = async () => {
-    setBootstrapState('INITIALIZING');
-    setErrorMessage(null);
-
-    try {
-      ConfigurationEngine.load();
-      
-      const adapter = new CapacitorSQLiteAdapter();
-      
-      // If we are on the web, we might need custom initialization for sqlite, 
-      // but we let the adapter handle it based on Capacitor Platform.
-      await StorageEngine.initialize(adapter);
-      
-      ConnectivityEngine.initialize();
-      AuthenticationEngine.initialize();
-      UserContextEngine.initialize();
-      WorkerProfileEngine.initialize();
-      
-      setBootstrapState('READY');
-    } catch (error) {
-      console.error('Bootstrap failed:', error);
-      setBootstrapState('ERROR');
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  useEffect(() => {
-    initializeBackend();
-  }, []);
+function AppShell() {
+  const { state: bootstrapState, error: errorMessage } = useApplicationLifecycle();
+  const { retry: initializeBackend } = useLifecycleBootstrap();
 
   return (
     <div id="app-root" className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col justify-between p-8 md:p-16 font-sans">
@@ -114,5 +76,13 @@ export default function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ApplicationLifecycleProvider>
+      <AppShell />
+    </ApplicationLifecycleProvider>
   );
 }
