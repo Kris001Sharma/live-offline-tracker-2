@@ -328,3 +328,65 @@ Any structural modification or API contract change requires an approved **Archit
 - Engine initialization updates the lifecycle state during bootstrap.
 - Consumers may READ lifecycle state through the public API (`useApplicationLifecycle`) but may NOT mutate it.
 - Feature components must not own, initialize, or anticipate lifecycle details.
+
+### Platform Runtime Contract
+
+> Platform runtime dependencies (Capacitor plugins, SQLite, Camera, Background Tasks, GPS, etc.) must have their platform bootstrap validated independently before any application architecture is modified.
+>
+> Runtime failures caused by missing platform integration must never be "fixed" by changing business logic, lifecycle management, routing, repositories, or backend engines.
+>
+> Platform integration is treated as an infrastructure responsibility and must remain isolated from application architecture.
+
+### Verified SQLite Runtime Compatibility
+
+The web platform SQLite runtime stack has been validated during **Phase 10A.3**.
+
+- **jeep-sqlite version**: 2.8.0
+- **sql.js version**: 1.12.0
+
+The runtime asset `public/assets/sql-wasm.wasm` must always originate from **sql.js 1.12.0**.
+
+- The SQL.js runtime and the shipped WebAssembly binary must always originate from the same installed version.
+- Upgrading sql.js requires explicit compatibility verification with jeep-sqlite before adoption.
+- Do not upgrade sql.js independently.
+
+The runtime compatibility has been validated during Phase 10A.3.
+
+## Golden Rule — Platform Asset Verification
+
+Before investigating application logic involving browser runtime components (WebAssembly, Service Workers, Web Workers, Capacitor Web plugins, static runtime assets, etc.), verify the runtime assets independently.
+
+Verification must confirm:
+
+- expected asset path
+
+- actual requested URL
+
+- HTTP response code
+
+- MIME type
+
+- file size
+
+- binary signature (magic bytes)
+
+- browser network response
+
+Application code must never be modified until the platform asset has been proven valid.
+
+Platform Integration defects must be isolated before Application Layer investigation begins.
+
+## Golden Rule — Root Cause Before Repair
+
+When debugging any subsystem:
+
+- Never apply speculative fixes.
+- Never stack multiple changes together.
+- Never "try another approach" without identifying the exact failing layer.
+- Every implementation slice must be preceded by a completed investigation proving the precise failure point.
+- Every investigation must reduce the uncertainty window.
+- Every implementation slice must repair exactly one verified root cause.
+- After each repair, stop and validate before continuing.
+- Never bypass a failure.
+- Never introduce architectural changes while investigating runtime behaviour.
+- Runtime evidence always overrides assumptions.
