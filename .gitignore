@@ -64,3 +64,5 @@ capacitor-cordova-android-plugins/
 .cache/
 .vite/
 .turbo/
+
+supabase/.temp/
