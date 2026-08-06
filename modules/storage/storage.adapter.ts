@@ -39,6 +39,7 @@ export class CapacitorSQLiteAdapter implements StorageAdapter {
       }
 
       await this.db.open();
+      await this.db.execute('PRAGMA foreign_keys = ON');
       this.initialized = true;
     } catch (error) {
       this.initialized = false;

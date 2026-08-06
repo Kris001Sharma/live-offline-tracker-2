@@ -131,24 +131,6 @@ async function runValidation() {
   await validateConfigurationEngine();
   await validateStorageEngine(); // Initializes DB for the rest
   
-  // Set up Schema
-  const adapter = new BunSQLiteAdapter(':memory:');
-  await StorageEngine.initialize(adapter);
-  await StorageEngine.execute(`
-    CREATE TABLE IF NOT EXISTS workers (
-        worker_id TEXT PRIMARY KEY,
-        employee_code TEXT,
-        email TEXT UNIQUE NOT NULL,
-        display_name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        organization TEXT,
-        active INTEGER NOT NULL DEFAULT 1,
-        synced_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
-  `);
-  
   await validateAuthenticationEngine();
   await validateUserContextEngine();
 

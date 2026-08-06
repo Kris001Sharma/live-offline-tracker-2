@@ -1,4 +1,5 @@
 import { StorageAdapter, QueryResult } from './storage.types';
+import { MigrationEngine, migrations } from '../../database/migrations';
 
 let currentAdapter: StorageAdapter | null = null;
 let initialized = false;
@@ -15,6 +16,7 @@ export const StorageEngine = {
 
     try {
       await adapter.initialize();
+      await MigrationEngine.run(adapter, migrations);
       currentAdapter = adapter;
       initialized = true;
     } catch (error) {
