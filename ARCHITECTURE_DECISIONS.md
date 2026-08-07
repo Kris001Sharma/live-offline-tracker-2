@@ -88,3 +88,11 @@ This document records the key architectural decisions made for the Sapana Live T
   3. Any structural modification or contract alteration requires an approved Architecture Decision Record (ADR) prior to implementation.
 - **Status**: Approved
 
+---
+
+## ADR-012: Initialization Ownership
+
+- **Decision**: `ApplicationLifecycle` owns application bootstrap serialization. `StorageEngine` owns concurrency safety of its public `initialize()` API. Engine correctness must never depend on caller behaviour. Bootstrap serialization and Engine API safety are independent architectural responsibilities.
+- **Reason**: Investigation Slices 11.2, 11.3, and 11.3B proved that React StrictMode double-invocation caused two concurrent `StorageEngine.initialize()` calls to corrupt the shared jeep-sqlite connection registry (`Execute: sapana_local_storage database not opened`). The trigger lives in the Application Shell (bootstrap orchestration); the vulnerability lives in `StorageEngine` (its `initialized` flag was committed only after the full async chain, so the guard was not concurrency-safe). These belong to different architectural layers: the shell owns the application lifecycle state machine, while `StorageEngine` owns its public API contract and must be safe for any caller (React, validation framework, future engines, CLI utilities, tests, background services) independent of React.
+- **Status**: Accepted
+

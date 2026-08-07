@@ -61,7 +61,7 @@ export class CapacitorSQLiteAdapter implements StorageAdapter {
           rows: (res.values || []) as T[],
         };
       } else {
-        const res = await this.db!.run(query, params);
+        const res = await this.db!.run(query, params, false);
         return {
           rows: [],
           rowsAffected: res.changes?.changes || 0,
@@ -77,13 +77,20 @@ export class CapacitorSQLiteAdapter implements StorageAdapter {
     this.ensureInitialized();
     
     try {
-      await this.db!.execute('BEGIN TRANSACTION');
+      await this.db!.beginTransaction();
+      const isTransActive = await this.db!.isTransactionActive();
+      if (!isTransActive.result) {
+        throw new Error('Storage Adapter: Transaction is not active.');
+      }
       const result = await action(this);
-      await this.db!.execute('COMMIT');
+      await this.db!.commitTransaction();
+      if (Capacitor.getPlatform() === 'web') {
+        await this.sqlite.saveToStore(DATABASE_NAME);
+      }
       return result;
     } catch (error) {
       try {
-        await this.db!.execute('ROLLBACK');
+        await this.db!.rollbackTransaction();
       } catch (rollbackError) {
         console.error('Storage Adapter: Failed to rollback transaction.', rollbackError);
       }

@@ -329,6 +329,20 @@ Any structural modification or API contract change requires an approved **Archit
 - Consumers may READ lifecycle state through the public API (`useApplicationLifecycle`) but may NOT mutate it.
 - Feature components must not own, initialize, or anticipate lifecycle details.
 
+### Initialization Ownership (ADR-012)
+
+`StorageEngine.initialize()`
+
+- Sequentially idempotent
+- Concurrently single-flight
+- Safe for any caller
+- Independent of ApplicationLifecycle
+
+`ApplicationLifecycle`
+
+- Owns bootstrap orchestration
+- Does not own StorageEngine API correctness
+
 ### Platform Runtime Contract
 
 > Platform runtime dependencies (Capacitor plugins, SQLite, Camera, Background Tasks, GPS, etc.) must have their platform bootstrap validated independently before any application architecture is modified.

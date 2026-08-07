@@ -3,6 +3,7 @@ import { MigrationEngine, migrations } from '../../database/migrations';
 
 let currentAdapter: StorageAdapter | null = null;
 let initialized = false;
+let initializationPromise: Promise<void> | null = null;
 
 export const StorageEngine = {
   async initialize(adapter: StorageAdapter): Promise<void> {
@@ -14,16 +15,26 @@ export const StorageEngine = {
       throw new Error('Storage Engine: Adapter is required for initialization.');
     }
 
-    try {
-      await adapter.initialize();
-      await MigrationEngine.run(adapter, migrations);
-      currentAdapter = adapter;
-      initialized = true;
-    } catch (error) {
-      currentAdapter = null;
-      initialized = false;
-      throw new Error(`Storage Engine: Initialization failed. ${error instanceof Error ? error.message : String(error)}`);
+    if (initializationPromise) {
+      return initializationPromise;
     }
+
+    initializationPromise = (async () => {
+      try {
+        await adapter.initialize();
+        await MigrationEngine.run(adapter, migrations);
+        currentAdapter = adapter;
+        initialized = true;
+      } catch (error) {
+        currentAdapter = null;
+        initialized = false;
+        throw new Error(`Storage Engine: Initialization failed. ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        initializationPromise = null;
+      }
+    })();
+
+    return initializationPromise;
   },
 
   async health(): Promise<boolean> {
