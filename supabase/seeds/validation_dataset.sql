@@ -55,13 +55,18 @@ ON CONFLICT (id) DO UPDATE SET
     updated_at = NOW();
 
 -- 5. Tracking Events
-INSERT INTO events (id, event_type, event_data, occurred_at, worker_id, shift_id)
+-- sync_status 'SYNCED' marks baseline remote records as already synchronized,
+-- consistent with the seed's other remote-baseline rows (attendance, trusted_devices).
+-- sync_retry_count 0 is the deterministic initial retry counter.
+INSERT INTO events (id, event_type, event_data, occurred_at, worker_id, shift_id, sync_status, sync_retry_count)
 VALUES 
-('event-baseline-1', 'LOCATION_UPDATE', '{"lat": 27.7172, "lng": 85.3240}', NOW() - INTERVAL '7 hours', 'worker-active-a', 'shift-baseline-1'),
-('event-baseline-2', 'LOCATION_UPDATE', '{"lat": 27.7175, "lng": 85.3245}', NOW() - INTERVAL '6 hours', 'worker-active-a', 'shift-baseline-1')
+('event-baseline-1', 'LOCATION_UPDATE', '{"lat": 27.7172, "lng": 85.3240}', NOW() - INTERVAL '7 hours', 'worker-active-a', 'shift-baseline-1', 'SYNCED', 0),
+('event-baseline-2', 'LOCATION_UPDATE', '{"lat": 27.7175, "lng": 85.3245}', NOW() - INTERVAL '6 hours', 'worker-active-a', 'shift-baseline-1', 'SYNCED', 0)
 ON CONFLICT (id) DO UPDATE SET 
     event_type = EXCLUDED.event_type,
     event_data = EXCLUDED.event_data,
     occurred_at = EXCLUDED.occurred_at,
     worker_id = EXCLUDED.worker_id,
-    shift_id = EXCLUDED.shift_id;
+    shift_id = EXCLUDED.shift_id,
+    sync_status = EXCLUDED.sync_status,
+    sync_retry_count = EXCLUDED.sync_retry_count;

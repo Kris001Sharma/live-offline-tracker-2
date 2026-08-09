@@ -158,5 +158,7 @@ This document outlines the milestones, feature releases, and chronological plan 
   - **Slice 10A.2**: Application Lifecycle - ✅ COMPLETED
   - **Slice 10A.3**: React Router Foundation - ✅ COMPLETED
   - **Slice 10A.3.1**: Platform Runtime Contract Documentation + Minimal Web Platform Bootstrap - The Platform Runtime Contract has been adopted as a permanent engineering practice.
+  - **Slice 10A.4**: Worker Login (Authentication Gate UI) - ✅ COMPLETED
+  - **Slice 10A.4-V**: Worker Login Validation & Baseline Closure - ✅ COMPLETED (BASELINE VERIFIED)
 - **Phase 11**: Production Hardening
 - **Phase 12**: Deployment & Release

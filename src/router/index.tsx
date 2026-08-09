@@ -1,6 +1,6 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import BootstrapScreen from './BootstrapScreen';
-import DashboardPlaceholder from './DashboardPlaceholder';
+import AuthGate from './AuthGate';
 import { useApplicationLifecycle, useLifecycleBootstrap } from '../shell';
 
 const router = createBrowserRouter([
@@ -14,9 +14,9 @@ function AppRoutes() {
   const { state, error } = useApplicationLifecycle();
   const { retry: initializeBackend } = useLifecycleBootstrap();
 
-  // When lifecycle is READY, show dashboard placeholder
+  // When lifecycle is READY, show auth gate (login / session restore / dashboard)
   if (state === 'READY') {
-    return <DashboardPlaceholder />;
+    return <AuthGate />;
   }
 
   // When lifecycle is ERROR, show error screen

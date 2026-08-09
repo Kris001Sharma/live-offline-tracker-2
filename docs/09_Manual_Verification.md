@@ -821,17 +821,16 @@ Permanently record and verify that `AuthenticationEngine` is the sole module per
 ### Verification Results
 
 1. **Validation Dataset Specification**:
-   - `docs/12_Validation_Dataset.md` created with documented deterministic entities.
-   - Distinct sections created for Baseline Dataset, Transaction Dataset, and Fault Dataset.
-   - Defined identities (e.g., `worker-admin`, `worker-active-a`, `device-trusted-1`) to enable reliable End-to-End testing.
+   - `docs/12_Validation_Dataset.md` documents the deterministic baseline dataset and its exact identities (`worker-admin`, `worker-active-a`, `worker-active-b`, `worker-inactive`, `device-trusted-1`) and record counts.
 
 2. **Validation Dataset SQL Seed**:
    - `supabase/seeds/validation_dataset.sql` created successfully.
    - Idempotent `UPSERT` logic implemented using `ON CONFLICT (...) DO UPDATE SET ...` for all seeds.
    - Clean structural ordering preserves referential integrity (Workers -> Trusted Devices, Shifts -> Attendance, Events).
+   - `events` rows supply the canonical `NOT NULL` fields `sync_status` (`SYNCED`) and `sync_retry_count` (`0`).
 
 3. **Dataset Integrity Validation**:
-   - Seed script successfully executed against the configured Supabase environment via REST endpoints.
+   - Seed script successfully applied to the linked Supabase project (`supabase db query --linked --file supabase/seeds/validation_dataset.sql`).
    - Data verified as inserted without violating schema constraints.
    - Verified exact base counts:
      - Workers: 4
@@ -1117,6 +1116,24 @@ Permanently record and verify that `AuthenticationEngine` is the sole module per
 ### Overall Result
 **QUALITY GATE OV-6**
 **VERIFIED ✅**
+
+> **Correction (Slice 11.7):** The Phase 7 / Phase 8 claims above are not reproducible against the current
+> canonical schema. The live `events` table defines `sync_status` and `sync_retry_count` as `NOT NULL`
+> (no default), but the OV-6 scenario's `uploadLocations` payload omits both fields, so the Phase 7 sync
+> upload fails with `23502: null value in column "sync_status" of relation "events"`. This is a
+> validation-harness / live-schema constraint issue — the production `WorkerSyncEngine` correctly
+> propagates the provider error — and is **not** a production defect. OV-6 remains **BLOCKED at Phase 7**
+> until the scenario payload is aligned to the canonical `events` schema. This repair is outside the
+> Slice 11.7 scope (OV-6 must not be modified merely to make it pass).
+
+> **Resolution (Slice 11.9):** The OV-6 harness defect was repaired and the original claims are now
+> reproducible. Slice 11.8 aligned the `uploadLocations` payload to the canonical `events` schema
+> (`sync_status: 'SYNCED'`, `sync_retry_count: 0`) and made OV-6 setup self-contained for geofence
+> configuration. Slice 11.9 replaced the Phase 10 exact-equality coordinate assertions with
+> precision-aware comparisons (tolerance `0.0005`) to match the canonical `REAL`/float4 storage contract
+> (verified: `100.5018::REAL → 100.502` while `DOUBLE PRECISION` preserves `100.5018`; live columns are
+> `real`/`float4`). OV-6 now passes independently (105/105) and in the full operational suite (301/301,
+> OV-1 → OV-6 all PASS). Production code, canonical schema, migrations, and seed were not modified.
 
 ---
 

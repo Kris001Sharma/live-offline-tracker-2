@@ -37,6 +37,9 @@ export class OperationalOfflineSyncScenario implements OperationalScenario {
   public title = 'Offline Synchronization & Recovery Operational Validation';
   public description = 'Validates complete offline workday execution and subsequent idempotent recovery synchronization to Supabase upon network restoration.';
 
+  // Postgres REAL (float4) stores ~6 significant digits; 0.0005 is half the 6th-significant-digit place value for ~100° coordinates
+  private static readonly COORDINATE_TOLERANCE = 0.0005;
+
   private testWorkerId = 'SYSTEM';
   private testEmail = 'system@sapana.local';
   private shiftId = `SHIFT-OV6-${Date.now()}`;
@@ -125,7 +128,9 @@ export class OperationalOfflineSyncScenario implements OperationalScenario {
         }),
         occurred_at: loc.recorded_at,
         worker_id: loc.worker_id,
-        shift_id: loc.shift_id
+        shift_id: loc.shift_id,
+        sync_status: 'SYNCED',
+        sync_retry_count: 0
       }));
 
       const { error } = await this.supabaseClient.from('events').upsert(payload);
@@ -136,6 +141,11 @@ export class OperationalOfflineSyncScenario implements OperationalScenario {
   };
 
   public async setup(): Promise<void> {
+    // Ensure required geofence environment configuration (self-contained, independent of prior scenarios)
+    process.env.VITE_ATTENDANCE_GEOFENCE_LAT = '13.7563';
+    process.env.VITE_ATTENDANCE_GEOFENCE_LNG = '100.5018';
+    process.env.VITE_ATTENDANCE_GEOFENCE_RADIUS = '100';
+
     // 1. Initialize storage and configurations
     const adapter = new BunSQLiteAdapter(':memory:');
     await StorageEngine.initialize(adapter);
@@ -366,8 +376,11 @@ export class OperationalOfflineSyncScenario implements OperationalScenario {
     assertEqual(remoteAtt.worker_id, localAttendance.worker_id, 'Phase 10: Worker ID matches between local and remote');
     assertEqual(new Date(remoteAtt.check_in_at).toISOString(), new Date(localAttendance.check_in_at).toISOString(), 'Phase 10: Check-in timestamp matches between local and remote');
     assertEqual(new Date(remoteAtt.check_out_at).toISOString(), new Date(localAttendance.check_out_at!).toISOString(), 'Phase 10: Check-out timestamp matches between local and remote');
-    assertEqual(remoteAtt.latitude, localAttendance.latitude, 'Phase 10: Check-in latitude matches between local and remote');
-    assertEqual(remoteAtt.longitude, localAttendance.longitude, 'Phase 10: Check-in longitude matches between local and remote');
+    const tolerance = OperationalOfflineSyncScenario.COORDINATE_TOLERANCE;
+    const latDiff = Math.abs(remoteAtt.latitude - localAttendance.latitude);
+    assertTrue(latDiff <= tolerance, `Phase 10: Check-in latitude matches remote within tolerance ${tolerance} (difference: ${latDiff})`);
+    const lngDiff = Math.abs(remoteAtt.longitude - localAttendance.longitude);
+    assertTrue(lngDiff <= tolerance, `Phase 10: Check-in longitude matches remote within tolerance ${tolerance} (difference: ${lngDiff})`);
 
     const localLocations = await LocationRepository.findBetween(this.testWorkerId, '2000-01-01', '2100-01-01');
     assertEqual(localLocations.length, 20, 'Phase 10: Exactly 20 local locations verified');
