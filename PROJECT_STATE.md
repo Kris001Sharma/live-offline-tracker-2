@@ -3,9 +3,61 @@
 ## Project Metadata
 
 - **Project Name**: Sapana Live Tracker
-- **Current Phase**: Repository Bootstrap
+- **Current Phase**: Phase 10A — Worker Application / UI (ACTIVE)
 - **Architecture Version**: v1.0
-- **Project Status**: Initializing Repository
+- **Project Status**: 10A.4 + 10A.4-V verified UI baseline frozen
+
+## Canonical Phase Structure
+
+### Phase 11 — Production Foundation / Validation
+- **Purpose**: Production architecture, storage reliability, lifecycle correctness, validation infrastructure, environment provisioning, regression closure, production-readiness verification.
+- **Status**: **COMPLETE / FROZEN**
+- **Baseline**: closed with operational 301/301 PASS, synchronization 13/13 PASS, cloud 50/50 PASS, engine 27/27 PASS, repository 44/44 PASS, integration 44/44 PASS, TypeScript validation PASS, OV-6 live offline → online recovery PASS, live payload persistence verified.
+- Phase 11 is **not** the active feature-development phase. Do not reopen it unless a future product slice produces evidence of a defect in the frozen foundation. The uncommitted/legacy changes from Slices 11.7–11.9 are intentional validation/documentation changes and are not an invitation to continue Phase 11 work.
+
+### Phase 10A — Worker Application / UI
+- **Purpose**: Build the worker-facing application experience on top of the frozen production foundation — application shell, authentication presentation, worker dashboard, attendance interaction, tracking visibility, synchronization visibility, worker-facing operational states, and other worker journey UI capabilities explicitly approved by the roadmap.
+- **Status**: **ACTIVE PRODUCT-DEVELOPMENT STREAM**
+
+## Development Model
+
+Every product capability follows:
+
+```text
+PRODUCT/UI IMPLEMENTATION SLICE
+        ↓
+IMMEDIATE VALIDATION SLICE
+        ↓
+BASELINE VERIFIED
+        ↓
+FREEZE
+        ↓
+NEXT PRODUCT/UI SLICE
+```
+
+- Implementation slices use identifier `10A.X`; validation slices use `10A.X-V`.
+- Slices are deliberately bite-sized: one user-facing problem, a small clearly owned area of the repository, consuming existing frozen public APIs, independently testable and reversible.
+- UI owns presentation, interaction, local UI state, routing, user-facing error states, and composition of frozen public APIs. UI must not access SQLite directly, create its own Supabase client, bypass AuthenticationEngine/StorageEngine, duplicate domain logic, implement synchronization, modify lifecycle ownership, or introduce alternate persistence mechanisms.
+- Validation is evidence collection proportional to the slice. On the first meaningful failure: STOP, identify the divergence, classify owner, repair only if the repair belongs to the current slice.
+- A slice freezes only when implementation is complete, focused validation passes, required regression passes, manual/runtime checks pass, no unresolved production defect remains, temporary diagnostics are removed, documentation is updated, and the working tree contains only intentional changes.
+
+## Current Application/UI Baseline
+
+| Slice | Title | Status |
+| ----- | ----- | ------ |
+| 10A.1 | Application Bootstrap Foundation | ✅ COMPLETED |
+| 10A.2 | Application Lifecycle | ✅ COMPLETED |
+| 10A.3 | React Router / Application Shell | ✅ COMPLETED |
+| 10A.4 | Worker Login (Authentication Gate UI) | ✅ COMPLETED |
+| 10A.4-V | Worker Login Validation & Baseline Closure | ✅ **BASELINE VERIFIED** |
+
+**10A.4 + 10A.4-V = FROZEN APPLICATION/UI BASELINE.** Do not reimplement or re-audit Worker Login unless a verified defect appears. Do not rename or reopen 10A.4.
+
+## Slice 10A.4-R — Application/UI Phase Structure Reset & Baseline Alignment
+
+- **Status**: Completed — **planning/documentation only**
+- **Summary**: Canonical planning/documentation alignment slice. Phase 11 explicitly recorded as **COMPLETE / FROZEN**; Phase 10A explicitly recorded as the **ACTIVE** Worker Application/UI phase. 10A.4 + 10A.4-V recorded as the current verified UI baseline. Implementation/validation naming convention (`10A.X` / `10A.X-V`) and the bite-sized slice → validation → freeze cycle established as binding for all future UI work. No product capability implemented; no production behaviour, engines, database/schema, or validation infrastructure modified.
+- **Next roadmap capability identified (NOT implemented)**: **10A.5 — Device Verification** — the Worker Journey step immediately following Worker Login (docs/12_Product_Design.md): confirm the physical device matches the worker's registered trusted device before granting dashboard access. Implementable as a UI-only gate consuming the frozen `TrustedDeviceRegistrationEngine` public API (`status()` / `registerCurrentDevice()` / result codes). Appropriately bite-sized as a single vertical slice; no further split required. **Slice 10A.5 must not begin until this planning slice is closed.**
 
 ## Milestones and Status
 

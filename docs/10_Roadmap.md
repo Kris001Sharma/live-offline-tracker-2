@@ -16,8 +16,8 @@ This document outlines the milestones, feature releases, and chronological plan 
 | **Phase 9** | Administration | ✅ COMPLETED |
 | **Phase 9.5** | Operational Validation | ✅ COMPLETED |
 | **Backend RC1** | Backend Release Candidate Freeze | ✅ COMPLETED |
-| **Phase 10** | Application Shell & UI | ⏳ PLANNED |
-| **Phase 11** | Production Hardening | ⏳ PLANNED |
+| **Phase 10A** | Application Shell & UI | 🚧 ACTIVE |
+| **Phase 11** | Production Hardening | ✅ COMPLETED / FROZEN |
 | **Phase 12** | Deployment & Release | ⏳ PLANNED |
 
 ---
@@ -152,13 +152,31 @@ This document outlines the milestones, feature releases, and chronological plan 
   - Architecture Audit: Confirmed 100% compliance across all 9 engines and 4 repositories.
   - Backend Freeze: All public interfaces and contracts are officially frozen for Phase 10 UI development.
 
+## Phase Structure & Development Model
+
+Phase 11 (Production Foundation / Validation) is **COMPLETE / FROZEN** and is not the active feature-development phase. Phase 10A (Worker Application / UI) is the **ACTIVE product-development stream**, building worker-facing UI on top of the frozen production foundation.
+
+Every future product capability follows the cycle: **implementation slice (`10A.X`) → immediate validation slice (`10A.X-V`) → baseline verified → freeze → next slice.** Slices are deliberately bite-sized (one user-facing problem, a small clearly owned repository area, consuming existing frozen public APIs, independently testable and reversible). The UI layer consumes existing engine contracts only and must not access SQLite directly, create its own Supabase client, bypass AuthenticationEngine/StorageEngine, duplicate domain logic, or implement synchronization.
+
+### Phase 10A: Application Shell & UI (ACTIVE)
+
+- **Status**: ACTIVE 🚧
+- **Scope**: Application shell, authentication presentation, worker dashboard, attendance interaction, tracking visibility, synchronization visibility, worker-facing operational states, and other worker-journey UI capabilities explicitly approved by the roadmap.
+
+| Slice | Title | Status |
+| ----- | ----- | ------ |
+| **10A.1** | Application Bootstrap Foundation | ✅ COMPLETED |
+| **10A.2** | Application Lifecycle | ✅ COMPLETED |
+| **10A.3** | React Router Foundation | ✅ COMPLETED |
+| **10A.3.1** | Platform Runtime Contract Documentation + Minimal Web Platform Bootstrap | ✅ COMPLETED |
+| **10A.4** | Worker Login (Authentication Gate UI) | ✅ COMPLETED |
+| **10A.4-V** | Worker Login Validation & Baseline Closure | ✅ COMPLETED (BASELINE VERIFIED) |
+| **10A.4-R** | Application/UI Phase Structure Reset & Baseline Alignment (planning/documentation) | ✅ COMPLETED |
+| **10A.5** | Device Verification (trusted-device gate after login) | ⏳ PLANNED — identified, NOT implemented |
+
+**Current UI baseline (frozen)**: 10A.4 + 10A.4-V = verified Worker Login baseline. Do not reimplement or re-audit Worker Login unless a verified defect appears.
+
+**Next roadmap capability**: **10A.5 — Device Verification**, the Worker Journey step immediately following Worker Login (docs/12_Product_Design.md): the app confirms the physical device matches the worker's registered trusted device before granting dashboard access. This is implementable on the frozen foundation as a UI-only gate consuming the `TrustedDeviceRegistrationEngine` public API (`status()` / `registerCurrentDevice()` / result codes). It is appropriately bite-sized as a single vertical slice and does not require splitting.
+
 ### Future Phases
-- **Phase 10**: Application Shell & UI
-  - **Slice 10A.1**: Application Bootstrap Foundation - ✅ COMPLETED
-  - **Slice 10A.2**: Application Lifecycle - ✅ COMPLETED
-  - **Slice 10A.3**: React Router Foundation - ✅ COMPLETED
-  - **Slice 10A.3.1**: Platform Runtime Contract Documentation + Minimal Web Platform Bootstrap - The Platform Runtime Contract has been adopted as a permanent engineering practice.
-  - **Slice 10A.4**: Worker Login (Authentication Gate UI) - ✅ COMPLETED
-  - **Slice 10A.4-V**: Worker Login Validation & Baseline Closure - ✅ COMPLETED (BASELINE VERIFIED)
-- **Phase 11**: Production Hardening
 - **Phase 12**: Deployment & Release
