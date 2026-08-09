@@ -94,5 +94,19 @@ This document records the key architectural decisions made for the Sapana Live T
 
 - **Decision**: `ApplicationLifecycle` owns application bootstrap serialization. `StorageEngine` owns concurrency safety of its public `initialize()` API. Engine correctness must never depend on caller behaviour. Bootstrap serialization and Engine API safety are independent architectural responsibilities.
 - **Reason**: Investigation Slices 11.2, 11.3, and 11.3B proved that React StrictMode double-invocation caused two concurrent `StorageEngine.initialize()` calls to corrupt the shared jeep-sqlite connection registry (`Execute: sapana_local_storage database not opened`). The trigger lives in the Application Shell (bootstrap orchestration); the vulnerability lives in `StorageEngine` (its `initialized` flag was committed only after the full async chain, so the guard was not concurrency-safe). These belong to different architectural layers: the shell owns the application lifecycle state machine, while `StorageEngine` owns its public API contract and must be safe for any caller (React, validation framework, future engines, CLI utilities, tests, background services) independent of React.
-- **Status**: Accepted
+- **Status**: Approved (implemented by Slices 11.4A and 11.4B)
+
+---
+
+## ADR-013: Application Bootstrap Serialization
+
+- **Decision**: `ApplicationLifecycle` serializes the complete application bootstrap sequence. `initializeBackend()` is single-flight: concurrent callers join the in-flight bootstrap instead of starting a second sequence; a successful bootstrap is never restarted; a failed bootstrap leaves no stale in-flight state and always allows a fresh Retry Bootstrap attempt. React StrictMode double-invocation therefore produces at most one bootstrap sequence and one `READY` transition.
+- **Reason**: Slice 11.4B implements the shell-side half of ADR-012. `StorageEngine` single-flight (Slice 11.4A) only protects `StorageEngine.initialize()`; the Application Shell still needs to serialize the complete sequence (`ConfigurationEngine.load()`, `StorageEngine.initialize()`, `ConnectivityEngine.initialize()`, `AuthenticationEngine.initialize()`, `UserContextEngine.initialize()`, `WorkerProfileEngine.initialize()`) so that a second concurrent bootstrap cannot start a duplicate copy of the sequence or cause conflicting `READY`/`ERROR` transitions.
+- **Rules**:
+  1. The shell serializes bootstrap; it does not duplicate `StorageEngine`'s single-flight implementation.
+  2. The lifecycle state machine remains `NOT_INITIALIZED → INITIALIZING → READY` or `ERROR`.
+  3. Concurrent bootstrap callers join the in-flight bootstrap promise.
+  4. A post-`READY` invocation must not restart the bootstrap.
+  5. A failed bootstrap rejects, transitions to `ERROR`, keeps the error observable, and permits a fresh retry.
+- **Status**: Approved
 

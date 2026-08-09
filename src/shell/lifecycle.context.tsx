@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
 import { ConfigurationEngine } from '../../modules/configuration';
 import { StorageEngine, CapacitorSQLiteAdapter } from '../../modules/storage';
 import { ConnectivityEngine } from '../../modules/connectivity';
@@ -15,36 +15,67 @@ export function ApplicationLifecycleProvider({ children }: { children: ReactNode
     error: null,
   });
 
-  const initializeBackend = async () => {
-    setState({ state: 'INITIALIZING', error: null });
+  const inFlightRef = useRef<Promise<void> | null>(null);
+  const readyRef = useRef(false);
 
-    try {
-      ConfigurationEngine.load();
-      
-      const adapter = new CapacitorSQLiteAdapter();
-      await StorageEngine.initialize(adapter);
-      
-      ConnectivityEngine.initialize();
-      AuthenticationEngine.initialize();
-      UserContextEngine.initialize();
-      WorkerProfileEngine.initialize();
-      
-      setState({ state: 'READY', error: null });
-    } catch (error) {
-      console.error('Bootstrap failed:', error);
-      setState({ 
-        state: 'ERROR', 
-        error: error instanceof Error ? error.message : String(error) 
-      });
+  const initializeBackend = useCallback(async (): Promise<void> => {
+    if (readyRef.current) {
+      return;
     }
-  };
 
-  useEffect(() => {
-    initializeBackend();
+    if (inFlightRef.current) {
+      return inFlightRef.current;
+    }
+
+    const bootstrap = (async () => {
+      setState({ state: 'INITIALIZING', error: null });
+
+      try {
+        ConfigurationEngine.load();
+
+        const adapter = new CapacitorSQLiteAdapter();
+        await StorageEngine.initialize(adapter);
+
+        ConnectivityEngine.initialize();
+        AuthenticationEngine.initialize();
+        UserContextEngine.initialize();
+        WorkerProfileEngine.initialize();
+
+        readyRef.current = true;
+        setState({ state: 'READY', error: null });
+      } catch (error) {
+        console.error('Bootstrap failed:', error);
+        setState({
+          state: 'ERROR',
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    })();
+
+    inFlightRef.current = bootstrap;
+    try {
+      return await bootstrap;
+    } finally {
+      inFlightRef.current = null;
+    }
   }, []);
 
+  useEffect(() => {
+    initializeBackend().catch(() => {});
+  }, [initializeBackend]);
+
+  const retry = useCallback(() => {
+    initializeBackend().catch(() => {});
+  }, [initializeBackend]);
+
+  const value = useMemo<LifecycleContextValue>(
+    () => ({ ...state, retry }),
+    [state, retry],
+  );
+
   return (
-    <LifecycleContext.Provider value={{ ...state, retry: initializeBackend }}>
+    <LifecycleContext.Provider value={value}>
       {children}
     </LifecycleContext.Provider>
   );

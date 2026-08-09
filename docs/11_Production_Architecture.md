@@ -343,6 +343,34 @@ Any structural modification or API contract change requires an approved **Archit
 - Owns bootstrap orchestration
 - Does not own StorageEngine API correctness
 
+### Bootstrap Serialization (ADR-013)
+
+`ApplicationLifecycle` serializes the complete application bootstrap sequence (`src/shell/lifecycle.context.tsx`). The protected sequence is:
+
+```
+ConfigurationEngine.load()
+        ↓
+StorageEngine.initialize()
+        ↓
+ConnectivityEngine.initialize()
+        ↓
+AuthenticationEngine.initialize()
+        ↓
+UserContextEngine.initialize()
+        ↓
+WorkerProfileEngine.initialize()
+        ↓
+READY
+```
+
+The bootstrap entry point is single-flight:
+
+- **Concurrent bootstrap**: A caller that arrives while a bootstrap is running joins the in-flight bootstrap instead of starting a second sequence.
+- **Retry after failure**: A failed bootstrap clears its in-flight state and transitions to `ERROR`; a subsequent Retry Bootstrap starts a fresh sequence.
+- **Sequential post-success invocation**: Once `READY` is reached, the bootstrap is never restarted.
+
+React StrictMode development double-invocation therefore executes at most one bootstrap sequence and reaches `READY` once. The shell serializes bootstrap and does not duplicate `StorageEngine`'s single-flight implementation.
+
 ### Platform Runtime Contract
 
 > Platform runtime dependencies (Capacitor plugins, SQLite, Camera, Background Tasks, GPS, etc.) must have their platform bootstrap validated independently before any application architecture is modified.

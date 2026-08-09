@@ -34,3 +34,7 @@ docs: freeze Infrastructure Layer Complete until Repository layer
 - **Status**: Implemented
 - **Summary**: `StorageEngine` now guarantees single-flight initialization. Concurrent callers share one in-flight initialization instead of creating independent initializations, preserving the documented idempotent public API contract for all callers. Application bootstrap serialization is intentionally deferred to Slice 11.4B (ADR-012).
 
+### Slice 11.4B — Application Bootstrap Serialization
+- **Status**: Implemented
+- **Summary**: `ApplicationLifecycle` now owns serialization of the complete application bootstrap sequence (ADR-013). `initializeBackend()` is single-flight: concurrent callers join the in-flight bootstrap, a post-`READY` invocation never restarts the sequence, and a failed bootstrap clears its in-flight state so Retry Bootstrap always starts fresh. React StrictMode double-invocation executes at most one bootstrap sequence and reaches `READY` once. `StorageEngine` and its single-flight implementation (Slice 11.4A) are unmodified.
+
