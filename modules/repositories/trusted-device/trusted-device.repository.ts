@@ -74,6 +74,95 @@ export const TrustedDeviceRepository = {
   },
 
   /**
+   * Registers a device as the worker's ACTIVE trusted device.
+   *
+   * Used by the first-device self-registration flow: the current device
+   * becomes the worker's active (APPROVED) trusted device immediately.
+   * If a historical record already exists for the same worker + device
+   * (e.g. REVOKED after a reset, or a legacy PENDING_APPROVAL request),
+   * that record is re-activated instead of duplicating the device row.
+   *
+   * Database-level enforcement: the partial unique index
+   * idx_trusted_devices_one_active_per_worker guarantees at most one
+   * APPROVED record per worker.
+   */
+  async registerActive(data: TrustedDeviceRegistrationData): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await StorageEngine.transaction(async (tx) => {
+        const existing = await tx.execute<{ id: string }>(
+          `SELECT id FROM trusted_devices WHERE worker_id = ? AND device_id = ? ORDER BY created_at DESC LIMIT 1`,
+          [data.workerId, data.deviceId]
+        );
+
+        if (existing.rows.length > 0) {
+          await tx.execute(
+            `UPDATE trusted_devices
+             SET status = 'APPROVED', approved_at = ?, approved_by = NULL,
+                 manufacturer = ?, model = ?, platform = ?, app_version = ?,
+                 registered_at = ?, sync_status = 'PENDING', updated_at = ?
+             WHERE id = ?`,
+            [
+              now,
+              data.manufacturer,
+              data.model,
+              data.platform,
+              data.appVersion,
+              data.registeredAt,
+              now,
+              existing.rows[0].id
+            ]
+          );
+        } else {
+          await tx.execute(
+            `INSERT INTO trusted_devices (
+              id, worker_id, device_id, manufacturer, model, platform, app_version,
+              registered_at, approved_at, status, sync_status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', 'PENDING', ?, ?)`,
+            [
+              data.id,
+              data.workerId,
+              data.deviceId,
+              data.manufacturer,
+              data.model,
+              data.platform,
+              data.appVersion,
+              data.registeredAt,
+              now,
+              now,
+              now
+            ]
+          );
+        }
+      });
+    } catch (error) {
+      throw new TrustedDeviceRepositoryError('PERSISTENCE_ERROR', error);
+    }
+  },
+
+  /**
+   * Resets the worker's active trusted device.
+   *
+   * Demotes the worker's APPROVED device to the historical REVOKED status so
+   * the worker has no active trusted device and may register a new device on
+   * the next login. Historical records are preserved for audit/history.
+   * Idempotent: no-op when the worker has no APPROVED device.
+   */
+  async resetActive(workerId: string): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+      await StorageEngine.execute(
+        `UPDATE trusted_devices
+         SET status = 'REVOKED', approved_at = NULL, approved_by = NULL, sync_status = 'PENDING', updated_at = ?
+         WHERE worker_id = ? AND status = 'APPROVED'`,
+        [now, workerId]
+      );
+    } catch (error) {
+      throw new TrustedDeviceRepositoryError('PERSISTENCE_ERROR', error);
+    }
+  },
+
+  /**
    * Look up all registration records associated with a specific worker.
    */
   async findByWorker(workerId: string): Promise<TrustedDeviceRecord[]> {

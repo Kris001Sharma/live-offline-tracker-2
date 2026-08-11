@@ -7,6 +7,14 @@ import { UserContextEngine } from '../../modules/user-context';
 import { WorkerProfileEngine, WorkerProfileLifecycle } from '../../modules/worker-profile';
 import { WorkerAdminEngine, WorkerAdminLifecycle } from '../../modules/worker-administration';
 import { WorkerSyncEngine, WorkerSyncLifecycle } from '../../modules/worker-sync';
+import { WorkerRepository } from '../../modules/repositories/worker';
+import { TrustedDeviceRepository } from '../../modules/repositories/trusted-device';
+import { TrustedDeviceEngine, BrowserDeviceIdentity } from '../../modules/trusted-device';
+import {
+  TrustedDeviceRegistrationEngine,
+  DeviceVerificationState,
+  TrustedDeviceRegistrationResultCode
+} from '../../modules/trusted-device-registration';
 
 
 
@@ -202,6 +210,121 @@ async function runValidation() {
     assert(syncRes.success === false || syncRes.success === true, 'WorkerSyncEngine.sync() handles execution without crashing');
   } catch (err: any) {
     assert(false, `WorkerSyncEngine validation threw: ${err.message}`);
+  }
+
+  // Validate TrustedDeviceRegistrationEngine (Slice 10A.5-D verification contract)
+  console.log('\n--- Validating TrustedDeviceRegistrationEngine ---');
+  try {
+    TrustedDeviceRegistrationEngine.initialize();
+    TrustedDeviceEngine.initialize();
+
+    const workerId = 'w-tdr-1';
+    await WorkerRepository.create({
+      workerId,
+      email: 'tdr@test.com',
+      displayName: 'Trusted Device Worker',
+      employeeCode: 'EMP-TDR',
+      role: 'WORKER',
+      organization: 'Org',
+      active: true
+    });
+    UserContextEngine.setCurrentWorker({
+      id: workerId,
+      email: 'tdr@test.com',
+      role: 'WORKER',
+      displayName: 'Trusted Device Worker',
+      active: true
+    });
+
+    // Deterministic browser test identity for each simulated device.
+    BrowserDeviceIdentity.setOverride('test-device-A');
+    await TrustedDeviceEngine.load();
+
+    // V1: Worker with no trusted device → NOT_REGISTERED.
+    const statusNoDevice = await TrustedDeviceRegistrationEngine.status();
+    assert(
+      statusNoDevice.verification === DeviceVerificationState.NOT_REGISTERED,
+      'status() reports NOT_REGISTERED when worker has no active trusted device'
+    );
+
+    // V2: First device self-registration succeeds.
+    const registerRes = await TrustedDeviceRegistrationEngine.registerCurrentDevice();
+    assert(registerRes.success === true && registerRes.code === TrustedDeviceRegistrationResultCode.SUCCESS, 'registerCurrentDevice() succeeds for the first device');
+    const registeredRecord = await TrustedDeviceRepository.findApprovedByWorker(workerId);
+    assert(registeredRecord?.deviceId === 'test-device-A' && registeredRecord?.status === 'APPROVED', 'registerCurrentDevice() persists the device as APPROVED');
+
+    // V3: The same device is now TRUSTED.
+    const statusTrusted = await TrustedDeviceRegistrationEngine.status();
+    assert(
+      statusTrusted.verification === DeviceVerificationState.TRUSTED,
+      'status() reports TRUSTED for the registered device'
+    );
+
+    // V4: A different device is DIFFERENT_DEVICE / BLOCKED.
+    BrowserDeviceIdentity.setOverride('test-device-B');
+    TrustedDeviceEngine.clear();
+    await TrustedDeviceEngine.load();
+
+    const statusDifferent = await TrustedDeviceRegistrationEngine.status();
+    assert(
+      statusDifferent.verification === DeviceVerificationState.DIFFERENT_DEVICE,
+      'status() reports DIFFERENT_DEVICE for an unregistered device when the worker has an active device'
+    );
+    const blockedRegister = await TrustedDeviceRegistrationEngine.registerCurrentDevice();
+    assert(
+      blockedRegister.success === false && blockedRegister.code === TrustedDeviceRegistrationResultCode.DEVICE_MISMATCH,
+      'registerCurrentDevice() blocks a different device while an active trusted device exists'
+    );
+    const approvedCount = await StorageEngine.execute<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM trusted_devices WHERE worker_id = ? AND status = 'APPROVED'`,
+      [workerId]
+    );
+    assert(approvedCount.rows[0].c === 1, 'database-level partial unique index keeps at most one APPROVED device per worker');
+    let indexViolation = false;
+    try {
+      await TrustedDeviceRepository.registerActive({
+        id: 'forced-second-approved',
+        workerId,
+        deviceId: 'test-device-C',
+        manufacturer: 'Test',
+        model: 'Test',
+        platform: 'web',
+        appVersion: '1.0.0',
+        registeredAt: new Date().toISOString()
+      });
+    } catch (e: any) {
+      indexViolation = true;
+    }
+    assert(indexViolation, 'registerActive() rejects a second APPROVED record via the partial unique index (persistence boundary)');
+
+    // V5: Administrator reset revokes the active device → NOT_REGISTERED again.
+    const resetRes = await TrustedDeviceRegistrationEngine.resetActiveDevice(workerId);
+    assert(resetRes.success === true && resetRes.code === TrustedDeviceRegistrationResultCode.SUCCESS, 'resetActiveDevice() succeeds');
+    const statusAfterReset = await TrustedDeviceRegistrationEngine.status();
+    assert(
+      statusAfterReset.verification === DeviceVerificationState.NOT_REGISTERED,
+      'status() reports NOT_REGISTERED after administrator reset'
+    );
+    const revokedRecords = await StorageEngine.execute<{ c: number }>(
+      `SELECT COUNT(*) AS c FROM trusted_devices WHERE worker_id = ? AND status = 'REVOKED'`,
+      [workerId]
+    );
+    assert(revokedRecords.rows[0].c >= 1, 'reset preserves the historical record as REVOKED (not deleted)');
+
+    // V6: Register after reset succeeds.
+    const registerAfterReset = await TrustedDeviceRegistrationEngine.registerCurrentDevice();
+    assert(registerAfterReset.success === true && registerAfterReset.code === TrustedDeviceRegistrationResultCode.SUCCESS, 'registerCurrentDevice() succeeds after reset');
+    const statusAfterReRegister = await TrustedDeviceRegistrationEngine.status();
+    assert(
+      statusAfterReRegister.verification === DeviceVerificationState.TRUSTED,
+      'status() reports TRUSTED for the re-registered device'
+    );
+
+    BrowserDeviceIdentity.clearOverride();
+    TrustedDeviceEngine.clear();
+    UserContextEngine.clear();
+  } catch (err: any) {
+    assert(false, `TrustedDeviceRegistrationEngine validation threw: ${err.message}`);
   }
 
   report('Engine');

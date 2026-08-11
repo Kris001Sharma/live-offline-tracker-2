@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AuthSession } from '../../modules/auth-session';
 import LoginScreen from './LoginScreen';
 import DashboardPlaceholder from './DashboardPlaceholder';
+import DeviceVerificationGate from './DeviceVerificationGate';
 
 type AuthPhase = 'checking' | 'unauthenticated' | 'authenticated';
 
@@ -47,17 +48,19 @@ const AuthGate: React.FC = () => {
 
   if (phase === 'authenticated') {
     return (
-      <div className="space-y-4">
-        <div className="flex justify-end">
-          <button
-            onClick={handleSignOut}
-            className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded font-mono text-sm transition-colors border border-neutral-700"
-          >
-            Sign Out
-          </button>
+      <DeviceVerificationGate onSignOut={handleSignOut}>
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button
+              onClick={handleSignOut}
+              className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded font-mono text-sm transition-colors border border-neutral-700"
+            >
+              Sign Out
+            </button>
+          </div>
+          <DashboardPlaceholder />
         </div>
-        <DashboardPlaceholder />
-      </div>
+      </DeviceVerificationGate>
     );
   }
 

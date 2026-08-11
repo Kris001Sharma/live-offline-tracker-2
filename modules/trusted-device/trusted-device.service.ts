@@ -1,4 +1,4 @@
-import { Device } from '@capacitor/device';
+import { selectDeviceIdentityProvider } from './device-identity.provider';
 import {
   TrustedDeviceIdentity,
   TrustedDeviceStatus,
@@ -16,9 +16,15 @@ import {
  * This engine intentionally performs NO trust validation, NO authentication, and NO registration.
  * Device approval and trusted-device verification belong to future Trusted Device Registration slices.
  * 
- * Why no persistence? The engine must query the real device hardware every session to prevent spoofing via stale cache.
+ * Why no persistence? The engine must query the real device every session to prevent spoofing via stale cache.
  * Why no approval logic? Trust is an administrative state, not a device property.
  * Why no Authentication? Device identity is independent of user identity. A device exists even before login.
+ *
+ * Device identity acquisition is delegated to an explicit platform boundary
+ * (DeviceIdentityProvider, selected by selectDeviceIdentityProvider): the
+ * browser provider is DEVELOPMENT/BROWSER ONLY, while the native provider
+ * returns the real device identity (Android: ANDROID_ID) on Capacitor
+ * platforms. The engine never calls the platform plugin directly.
  */
 
 let initialized = false;
@@ -103,20 +109,8 @@ export const TrustedDeviceEngine = {
 
       transitionTo(TrustedDeviceState.LOADING);
 
-      const deviceIdInfo = await Device.getId();
-      const deviceInfo = await Device.getInfo();
-      
-      const appVersion = (import.meta as any).env?.VITE_APP_VERSION || 'unknown';
-
-      const rawDevice: TrustedDeviceIdentity = {
-        deviceId: deviceIdInfo.identifier,
-        manufacturer: deviceInfo.manufacturer,
-        model: deviceInfo.model,
-        platform: deviceInfo.platform,
-        operatingSystem: deviceInfo.operatingSystem,
-        operatingSystemVersion: deviceInfo.osVersion,
-        appVersion: appVersion
-      };
+      const provider = selectDeviceIdentityProvider();
+      const rawDevice = await provider.getIdentity();
 
       if (!validateDevice(rawDevice)) {
         throw new Error('Mandatory device information is missing');

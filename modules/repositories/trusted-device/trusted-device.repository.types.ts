@@ -1,4 +1,4 @@
-export type TrustedDeviceStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+export type TrustedDeviceStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'REVOKED';
 export type SyncStatus = 'PENDING' | 'SYNCED' | 'FAILED';
 
 export class TrustedDeviceRepositoryError extends Error {

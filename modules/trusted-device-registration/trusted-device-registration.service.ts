@@ -3,6 +3,7 @@ import { TrustedDeviceEngine } from '../trusted-device';
 import { TrustedDeviceRepository, TrustedDeviceRecord } from '../repositories';
 import { 
   TrustedDeviceRegistrationStatus, 
+  DeviceVerificationState,
   RegistrationStatus, 
   TrustedDeviceRegistrationResult,
   TrustedDeviceRegistrationResultCode
@@ -87,18 +88,45 @@ export const TrustedDeviceRegistrationEngine = {
       const device = TrustedDeviceEngine.device();
 
       if (!isValidWorker(worker) || !isValidDevice(device)) {
-        return deepCloneAndFreeze({ status: TrustedDeviceRegistrationStatus.NOT_REGISTERED });
+        return deepCloneAndFreeze({
+          status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+          verification: DeviceVerificationState.ERROR
+        });
       }
 
       const thisDevice = await TrustedDeviceRepository.findByWorkerAndDevice(worker!.id, device!.deviceId);
+      const approvedDevice = await TrustedDeviceRepository.findApprovedByWorker(worker!.id);
 
-      if (thisDevice) {
-        return deepCloneAndFreeze({ status: thisDevice.status as unknown as TrustedDeviceRegistrationStatus });
+      // No active trusted device for this worker.
+      if (!approvedDevice) {
+        const recordStatus = thisDevice?.status === 'PENDING_APPROVAL' || thisDevice?.status === 'REJECTED'
+          ? (thisDevice.status as unknown as TrustedDeviceRegistrationStatus)
+          : TrustedDeviceRegistrationStatus.NOT_REGISTERED;
+
+        return deepCloneAndFreeze({
+          status: recordStatus,
+          verification: DeviceVerificationState.NOT_REGISTERED
+        });
       }
 
-      return deepCloneAndFreeze({ status: TrustedDeviceRegistrationStatus.NOT_REGISTERED });
+      // An active trusted device exists.
+      if (approvedDevice.deviceId === device!.deviceId) {
+        return deepCloneAndFreeze({
+          status: TrustedDeviceRegistrationStatus.APPROVED,
+          verification: DeviceVerificationState.TRUSTED
+        });
+      }
+
+      // A different active trusted device exists; this device is blocked.
+      return deepCloneAndFreeze({
+        status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+        verification: DeviceVerificationState.DIFFERENT_DEVICE
+      });
     } catch (e) {
-      return deepCloneAndFreeze({ status: TrustedDeviceRegistrationStatus.NOT_REGISTERED });
+      return deepCloneAndFreeze({
+        status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+        verification: DeviceVerificationState.ERROR
+      });
     }
   },
 
@@ -139,13 +167,6 @@ export const TrustedDeviceRegistrationEngine = {
             code: TrustedDeviceRegistrationResultCode.APPROVED
           });
         }
-        if (thisDeviceRegistration.status === 'PENDING_APPROVAL') {
-          rollbackRegistration();
-          return deepCloneAndFreeze({
-            success: true,
-            code: TrustedDeviceRegistrationResultCode.PENDING_APPROVAL
-          });
-        }
         if (thisDeviceRegistration.status === 'REJECTED') {
           rollbackRegistration();
           return deepCloneAndFreeze({
@@ -156,23 +177,23 @@ export const TrustedDeviceRegistrationEngine = {
         }
       }
 
-      // Repository Ownership: Check if worker already has an approved device (different device)
+      // Repository Ownership: Check if worker already has an active trusted device (different device)
       const approvedDevice = await TrustedDeviceRepository.findApprovedByWorker(worker!.id);
-      if (approvedDevice && approvedDevice.deviceId !== device!.deviceId) {
+      if (approvedDevice) {
         rollbackRegistration();
         return deepCloneAndFreeze({
           success: false,
           code: TrustedDeviceRegistrationResultCode.DEVICE_MISMATCH,
-          error: 'Worker already has an approved device.'
+          error: 'Worker already has an active trusted device.'
         });
       }
 
-      // No existing registration for this device: Insert atomically
+      // No active trusted device: the current device becomes the worker's active trusted device.
       const uuid = typeof crypto !== 'undefined' && crypto.randomUUID 
         ? crypto.randomUUID() 
         : Math.random().toString(36).substring(2, 15);
 
-      await TrustedDeviceRepository.register({
+      await TrustedDeviceRepository.registerActive({
         id: uuid,
         workerId: worker!.id,
         deviceId: device!.deviceId,
@@ -187,7 +208,7 @@ export const TrustedDeviceRegistrationEngine = {
 
       return deepCloneAndFreeze({
         success: true,
-        code: TrustedDeviceRegistrationResultCode.DEVICE_NOT_REGISTERED
+        code: TrustedDeviceRegistrationResultCode.SUCCESS
       });
 
     } catch (error: any) {
@@ -213,6 +234,37 @@ export const TrustedDeviceRegistrationEngine = {
       return record ? deepCloneAndFreeze(record) : null;
     } catch {
       return null;
+    }
+  },
+
+  /**
+   * Administrator reset: revokes the worker's active trusted device.
+   *
+   * After the reset the worker has no active trusted device and may register
+   * a new device on the next login. Historical records are preserved with the
+   * REVOKED status for audit/history. Idempotent when no active device exists.
+   */
+  async resetActiveDevice(workerId: string): Promise<TrustedDeviceRegistrationResult> {
+    if (!workerId || typeof workerId !== 'string' || workerId.trim() === '') {
+      return deepCloneAndFreeze({
+        success: false,
+        code: TrustedDeviceRegistrationResultCode.PRECONDITION_FAILED,
+        error: 'workerId is required.'
+      });
+    }
+
+    try {
+      await TrustedDeviceRepository.resetActive(workerId.trim());
+      return deepCloneAndFreeze({
+        success: true,
+        code: TrustedDeviceRegistrationResultCode.SUCCESS
+      });
+    } catch (error: any) {
+      return deepCloneAndFreeze({
+        success: false,
+        code: TrustedDeviceRegistrationResultCode.PERSISTENCE_ERROR,
+        error: 'PERSISTENCE_ERROR'
+      });
     }
   },
 
