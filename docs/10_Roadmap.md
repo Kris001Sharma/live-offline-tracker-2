@@ -172,11 +172,15 @@ Every future product capability follows the cycle: **implementation slice (`10A.
 | **10A.4** | Worker Login (Authentication Gate UI) | ✅ COMPLETED |
 | **10A.4-V** | Worker Login Validation & Baseline Closure | ✅ COMPLETED (BASELINE VERIFIED) |
 | **10A.4-R** | Application/UI Phase Structure Reset & Baseline Alignment (planning/documentation) | ✅ COMPLETED |
+| **10A.5-R** | Application Session & Device Identity Wiring Repair | ✅ COMPLETED (BASELINE VERIFIED via 10A.5-RV) |
+| **10A.5-RV** | Application Session & Device Identity Wiring Repair — Validation & Baseline Closure | ✅ COMPLETED (BASELINE VERIFIED) |
 | **10A.5** | Device Verification (trusted-device gate after login) | ⏳ PLANNED — identified, NOT implemented |
 
 **Current UI baseline (frozen)**: 10A.4 + 10A.4-V = verified Worker Login baseline. Do not reimplement or re-audit Worker Login unless a verified defect appears.
 
-**Next roadmap capability**: **10A.5 — Device Verification**, the Worker Journey step immediately following Worker Login (docs/12_Product_Design.md): the app confirms the physical device matches the worker's registered trusted device before granting dashboard access. This is implementable on the frozen foundation as a UI-only gate consuming the `TrustedDeviceRegistrationEngine` public API (`status()` / `registerCurrentDevice()` / result codes). It is appropriately bite-sized as a single vertical slice and does not require splitting.
+**Wiring repair (10A.5-R + 10A.5-RV, implemented, BASELINE VERIFIED)**: The application authentication flow now consumes the existing `AuthSession` public contract (`login` / `restore` / `logout`) so a successful authenticated session populates `UserContextEngine.setCurrentWorker()`; the application bootstrap now initializes and loads `TrustedDeviceEngine` so device identity is available before login. This restores the runtime-identity contracts required by `TrustedDeviceRegistrationEngine`. It does NOT implement the device-verification UI. The previously blocked live valid-login validation is now complete: the live validation credential is `admin@sapana.local` / `Validation@123` (the documented validation password is `Validation@123`, superseding the stale `Password123!`), and the login-dependent checks (post-login `currentWorker` population, session-restore repopulation, logout clearing, `TrustedDeviceRegistrationEngine.status()` = `NOT_REGISTERED` against the real authenticated worker) are browser-verified in 10A.5-RV.
+
+**Next roadmap capability**: **10A.5 — Device Verification**, the Worker Journey step immediately following Worker Login (docs/12_Product_Design.md): the app confirms the physical device matches the worker's registered trusted device before granting dashboard access. This is implementable on the frozen foundation as a UI-only gate consuming the `TrustedDeviceRegistrationEngine` public API (`status()` / `registerCurrentDevice()` / result codes). It is appropriately bite-sized as a single vertical slice and does not require splitting. **10A.5 is now unblocked: the 10A.5-R wiring repair is baseline verified (10A.5-RV) and the validation credential prerequisite is resolved (`Validation@123`).**
 
 ### Future Phases
 - **Phase 12**: Deployment & Release

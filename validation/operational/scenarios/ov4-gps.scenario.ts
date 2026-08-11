@@ -30,7 +30,7 @@ export class OperationalGPSScenario implements OperationalScenario {
   public description = 'Validates realistic location conditions independently through LocationEvaluationEngine.evaluate public API: valid GPS location, outside geofence rejection, poor accuracy rejection, missing coordinates rejection, stale timestamp rejection, impossible coordinates rejection, and rapid GPS jump rejection.';
 
   private testEmail = 'admin@sapana.local';
-  private testPassword = 'Password123!';
+  private testPassword = 'Validation@123';
   private geofence = {
     center: { latitude: 13.7563, longitude: 100.5018 },
     radiusMeters: 100

@@ -5,6 +5,8 @@ import { ConnectivityEngine } from '../../modules/connectivity';
 import { AuthenticationEngine } from '../../modules/authentication';
 import { UserContextEngine } from '../../modules/user-context';
 import { WorkerProfileEngine } from '../../modules/worker-profile';
+import { AuthSession } from '../../modules/auth-session';
+import { TrustedDeviceEngine } from '../../modules/trusted-device';
 import { LifecycleContextValue, LifecycleStateModel } from './lifecycle.types';
 
 const LifecycleContext = createContext<LifecycleContextValue | undefined>(undefined);
@@ -40,6 +42,9 @@ export function ApplicationLifecycleProvider({ children }: { children: ReactNode
         AuthenticationEngine.initialize();
         UserContextEngine.initialize();
         WorkerProfileEngine.initialize();
+        AuthSession.initialize();
+        TrustedDeviceEngine.initialize();
+        await TrustedDeviceEngine.load();
 
         readyRef.current = true;
         setState({ state: 'READY', error: null });

@@ -360,8 +360,16 @@ UserContextEngine.initialize()
         ↓
 WorkerProfileEngine.initialize()
         ↓
+AuthSession.initialize()
+        ↓
+TrustedDeviceEngine.initialize()
+        ↓
+TrustedDeviceEngine.load()
+        ↓
 READY
 ```
+
+`AuthSession` is the application-facing session orchestrator that coordinates `AuthenticationEngine` and `UserContextEngine` (established by Slice 10A.5-R). `TrustedDeviceEngine` owns runtime device identity, which is application-level and independent of authentication (the engine contract: "a device exists even before login"); it is therefore initialized and loaded during bootstrap, not after login. `TrustedDeviceEngine.load()` never rejects (it returns a structured `DEVICE_ERROR` result on failure and degrades to `CLEARED`), so a device-load failure cannot block `READY`.
 
 The bootstrap entry point is single-flight:
 

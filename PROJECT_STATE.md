@@ -5,7 +5,7 @@
 - **Project Name**: Sapana Live Tracker
 - **Current Phase**: Phase 10A — Worker Application / UI (ACTIVE)
 - **Architecture Version**: v1.0
-- **Project Status**: 10A.4 + 10A.4-V verified UI baseline frozen
+- **Project Status**: 10A.4 + 10A.4-V verified UI baseline frozen; 10A.5-R wiring repair + 10A.5-RV live-login validation complete (BASELINE VERIFIED)
 
 ## Canonical Phase Structure
 
@@ -50,8 +50,10 @@ NEXT PRODUCT/UI SLICE
 | 10A.3 | React Router / Application Shell | ✅ COMPLETED |
 | 10A.4 | Worker Login (Authentication Gate UI) | ✅ COMPLETED |
 | 10A.4-V | Worker Login Validation & Baseline Closure | ✅ **BASELINE VERIFIED** |
+| 10A.5-R | Application Session & Device Identity Wiring Repair | ✅ COMPLETED |
+| 10A.5-RV | Wiring Repair Validation & Baseline Closure | ✅ **BASELINE VERIFIED** |
 
-**10A.4 + 10A.4-V = FROZEN APPLICATION/UI BASELINE.** Do not reimplement or re-audit Worker Login unless a verified defect appears. Do not rename or reopen 10A.4.
+**10A.4 + 10A.4-V = FROZEN APPLICATION/UI BASELINE.** Do not reimplement or re-audit Worker Login unless a verified defect appears. Do not rename or reopen 10A.4. **10A.5-R + 10A.5-RV = VERIFIED WIRING REPAIR BASELINE**: the runtime identity contracts (`UserContextEngine` population via `AuthSession`, `TrustedDeviceEngine` bootstrap load) required by `TrustedDeviceRegistrationEngine` are validated end-to-end, including the login-dependent checks. Do not reopen unless a verified defect appears.
 
 ## Slice 10A.4-R — Application/UI Phase Structure Reset & Baseline Alignment
 
@@ -100,6 +102,35 @@ docs: freeze Infrastructure Layer Complete until Repository layer
 - **Methodology note**: Two earlier driver runs produced a V5/V6 false-negative caused by a measurement race (single-shot DOM queries during reload navigation); a DOM-debug probe confirmed the correct app state and the driver was hardened to poll transitions — the defect was in the temporary validation harness, not the production implementation.
 - **Cleanup**: Headless Chrome, dev server, and all stray vite processes removed; temp CDP scripts and browser profile deleted; ports verified clear; no repository pollution (temp scripts lived outside the repo).
 - **Final Baseline Decision**: **BASELINE VERIFIED** — Worker Login (Slice 10A.4) behaves correctly end-to-end on the frozen foundations; no production code, schema, migration, seed, or validation infrastructure modified; no unexpected findings; clean baseline.
+
+## Slice 10A.5-R — Application Session & Device Identity Wiring Repair
+
+- **Status**: Implemented — **BASELINE VERIFIED** (closure: Slice 10A.5-RV)
+- **Summary**: Minimal architectural wiring repair (investigation + repair slice, no device-verification UI). Two missing runtime-identity integrations were repaired using existing frozen public contracts:
+
+  1. **Authentication/session orchestration (Repair A)** — The application now routes authentication through the existing `AuthSession` public contract instead of calling `AuthenticationEngine` directly from the UI. `src/router/LoginScreen.tsx` now calls `AuthSession.login()`, `src/router/AuthGate.tsx` now calls `AuthSession.restore()` for session restoration and `AuthSession.logout()` for sign-out. This establishes `UserContextEngine.setCurrentWorker()` on successful login/restore and clears it on logout (atomic session construction with rollback), which the previous direct-`AuthenticationEngine` flow never populated.
+  2. **Trusted device initialization (Repair B)** — The application bootstrap (`src/shell/lifecycle.context.tsx`) now calls `AuthSession.initialize()`, `TrustedDeviceEngine.initialize()`, and awaits `TrustedDeviceEngine.load()` before `READY`. Device identity is application-level (independent of the worker — the engine contract states "a device exists even before login"), so it is established during bootstrap, not tied to authentication. `TrustedDeviceEngine.device()` is therefore available to `TrustedDeviceRegistrationEngine` after bootstrap instead of always returning `null`.
+
+  No frozen engine, repository, schema, migration, seed, or dependency was modified. No new abstraction or orchestration was introduced. No device-verification UI was implemented.
+- **Dependency ordering (documented)**: `ConfigurationEngine.load()` → `StorageEngine.initialize()` → `ConnectivityEngine.initialize()` → `AuthenticationEngine.initialize()` → `UserContextEngine.initialize()` → `WorkerProfileEngine.initialize()` → `AuthSession.initialize()` → `TrustedDeviceEngine.initialize()` → `await TrustedDeviceEngine.load()` → `READY`. `TrustedDeviceEngine.load()` never rejects (structured `DEVICE_ERROR` result on failure) so a device-load failure degrades to `CLEARED` without blocking `READY`.
+- **Environment prerequisite resolved**: The documented validation account `admin@sapana.local` was found to use the live credential `Validation@123` (not the previously documented `Password123!`). Direct `signInWithPassword` probe against live Supabase `https://ejluwdwklieobrknnboh.supabase.co` returned success (auth user `69d4e016-121e-4d62-b3ab-562efabda5ea`). This unblocked the live valid-login validation. The operational validation harness (OV-2..OV-5) and `AuthFixture` were aligned to the live credential `Validation@123` (validation-harness change only — no production code). The canonical documented password is now `Validation@123`.
+- **Validation performed**:
+  - `npm run lint` (`tsc --noEmit`) PASS; `npm run build` PASS (chunk-size warning pre-existing).
+  - Runtime (real browser against live Supabase `https://ejluwdwklieobrknnboh.supabase.co`, via temporary headless-Chrome CDP driver living outside the repository and removed after use): fresh boot reaches `READY` → `LoginScreen` only; invalid credentials still rejected through the `AuthSession.login()` path (live 400 translated to `INVALID_CREDENTIALS` UI error); pre-login `TrustedDeviceEngine.status()` = `{initialized: true, state: READY}` with a complete `device()` identity; local SQLite `trusted_devices` table present (canonical migration chain applied in the running app).
+  - Live database contract re-verified: canonical tables present (`workers`, `shifts`, `locations`, `events`, `attendance`, `trusted_devices`); validation dataset present (`worker-admin`, `worker-active-a/b`, `worker-inactive`, `device-trusted-1`/`worker-active-a`/`DEV-001-AAA`/`APPROVED`); connected project is the documented `ejluwdwklieobrknnboh`.
+- **Login-dependent checks (previously blocked) now executed via Slice 10A.5-RV**: valid login `admin@sapana.local` / `Validation@123` succeeds end-to-end; `UserContextEngine.currentWorker()` populated with `{id: 69d4e016-121e-4d62-b3ab-562efabda5ea, email: admin@sapana.local, displayName: admin@sapana.local, role: WORKER, active: true}` (AuthSession placeholder mapping); reload restores the persisted session and repopulates `currentWorker` (0 auth POSTs during restore); logout clears `currentWorker` and returns to `LoginScreen`; `TrustedDeviceRegistrationEngine.status()` = `NOT_REGISTERED` executed against the real authenticated worker + real local DB.
+- **Cleanup**: temporary CDP driver, auth probe scripts, headless Chrome profile, and dev server removed; ports verified clear; working tree contains only intentional changes.
+- **Final Baseline Decision**: **BASELINE VERIFIED** — the wiring repair is validated end-to-end, including the previously blocked login-dependent contract checks. Slice 10A.5 (Device Verification UI) may now proceed.
+
+## Slice 10A.5-RV — Application Session & Device Identity Wiring Repair Validation & Baseline Closure
+
+- **Status**: Implemented — **BASELINE VERIFIED**
+- **Summary**: Independent validation/closure slice for the 10A.5-R wiring repair. No production implementation. Executed the previously blocked live valid-login checks in a real browser (headless Chrome via Chrome DevTools Protocol, temporary driver outside the repository and removed after use) against the live Supabase backend, on top of the frozen authentication, session-orchestration, and device-identity foundations. The missing environment prerequisite (working validation credential) was resolved: the live validation account `admin@sapana.local` authenticates with `Validation@123`; the operational harness scenarios (OV-2..OV-5) and `AuthFixture` were aligned to that live credential (validation-harness change only).
+- **V1–V8 (browser-verified)**: V1 fresh boot reaches `READY` → `LoginScreen` only (no Dashboard, no Sign Out, no navigation); V2 pre-login `TrustedDeviceEngine.status()` = `{initialized: true, state: READY}` with complete `device()` identity (`deviceId 106cfe88-…`, manufacturer `Google Inc.`, model `Windows NT 10.0`, platform `web`); V3 local SQLite canonical tables present (`workers`, `trusted_devices`, `_migrations`); V4 invalid credentials rejected through the `AuthSession.login()` path (error feedback shown, stays on `LoginScreen`, unauthenticated, exactly 1 login POST); V5 valid login `admin@sapana.local` / `Validation@123` succeeds (Dashboard + Sign Out render, error cleared, exactly 1 additional login POST), `UserContextEngine.currentWorker()` = `{id: 69d4e016-121e-4d62-b3ab-562efabda5ea, email: admin@sapana.local, displayName: admin@sapana.local, role: WORKER, active: true}` matches the documented placeholder mapping, and `TrustedDeviceRegistrationEngine.status()` = `NOT_REGISTERED` executes against the real authenticated worker + real local DB; V6 reload restores the persisted session to Dashboard and repopulates `currentWorker` (0 auth POSTs during restore — storage read-back); V7 Sign Out returns to `LoginScreen` and clears `currentWorker` (unauthenticated); V8 zero console errors across the full flow. All 8/8 PASS.
+- **Regression (with corrected credential)**: `npm run lint` (`tsc --noEmit`) PASS; `npm run build` PASS (chunk-size warning pre-existing); full matrix green — repository 44/44, engine 27/27, integration 44/44, cloud 50/50, synchronization 13/13, operational 301/301 (OV-1 → OV-6, incl. OV-2 authentication workflow and OV-6 offline-sync) — total 479/479 PASS.
+- **Methodology note**: The OV-2..OV-5 operational scenarios previously hardcoded the stale `Password123!` and would have failed live login; they were aligned to the actual live credential `Validation@123`. This is a validation-harness/environment alignment, not a production change and not a frozen-engine change.
+- **Cleanup**: Headless Chrome, dev server, and all stray vite processes removed; temp CDP scripts and browser profile deleted; ports verified clear; no repository pollution (temp scripts lived outside the repo).
+- **Final Baseline Decision**: **BASELINE VERIFIED** — the 10A.5-R wiring repair behaves correctly end-to-end, including the login-dependent identity contracts that were previously blocked; no production code, schema, migration, seed, or validation infrastructure beyond the documented credential alignment was modified; clean baseline.
 
 ## Phase 11 — Production Hardening
 

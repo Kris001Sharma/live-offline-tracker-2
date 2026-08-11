@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AuthenticationEngine } from '../../modules/authentication';
+import { AuthSession } from '../../modules/auth-session';
 import LoginScreen from './LoginScreen';
 import DashboardPlaceholder from './DashboardPlaceholder';
 
@@ -13,7 +13,7 @@ const AuthGate: React.FC = () => {
     let cancelled = false;
 
     if (!restoreRef.current) {
-      restoreRef.current = AuthenticationEngine.restoreSession()
+      restoreRef.current = AuthSession.restore()
         .then((result) => result.success)
         .catch(() => false);
     }
@@ -30,7 +30,7 @@ const AuthGate: React.FC = () => {
   }, []);
 
   const handleSignOut = async () => {
-    await AuthenticationEngine.logout();
+    await AuthSession.logout();
     setPhase('unauthenticated');
   };
 

@@ -32,7 +32,7 @@ export class OperationalLocalWorkdayScenario implements OperationalScenario {
   public description = 'Validates a complete offline staff workday end-to-end: setup, shift verification, GPS validation, clock-in, 15 simulated workday location samples, clock-out, final integrity checks, and cleanup.';
 
   private testEmail = 'admin@sapana.local';
-  private testPassword = 'Password123!';
+  private testPassword = 'Validation@123';
   private workerId = 'SYSTEM';
   private shiftId = 'SHIFT-LOCAL-WORKDAY-01';
 

@@ -22,7 +22,7 @@ export class OperationalAuthenticationScenario implements OperationalScenario {
   public description = 'Validates the complete authentication lifecycle against live Supabase backend: unauthenticated state, invalid password translation, seeded account login, session restoration, contract immutability, and logout.';
 
   private testEmail = 'admin@sapana.local';
-  private testPassword = 'Password123!';
+  private testPassword = 'Validation@123';
 
   public async setup(): Promise<void> {
     const adapter = new BunSQLiteAdapter(':memory:');

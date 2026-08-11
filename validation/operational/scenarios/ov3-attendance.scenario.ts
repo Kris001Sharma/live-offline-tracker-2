@@ -25,7 +25,7 @@ export class OperationalAttendanceScenario implements OperationalScenario {
   public description = 'Validates the complete attendance business lifecycle: initial uncommitted state, clock-in, duplicate clock-in rejection, active attendance retrieval, clock-out, and duplicate clock-out rejection.';
 
   private testEmail = 'admin@sapana.local';
-  private testPassword = 'Password123!';
+  private testPassword = 'Validation@123';
   private workerId = 'SYSTEM';
 
   public async setup(): Promise<void> {

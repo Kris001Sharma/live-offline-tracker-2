@@ -81,3 +81,19 @@ After a successful application the live tables contain exactly the following bas
 - The seed must be applied before running the live validation suites
   (`validation/cloud/cloud.validation.ts`, `validation/synchronization/synchronization.validation.ts`).
 - The seed is repeatable; re-application is an idempotent upsert and does not create duplicates.
+
+## 8. Validation Auth Account
+
+The live authentication validation account used by the operational scenarios (OV-2..OV-5),
+`AuthFixture`, and the browser-verified UI slices is:
+
+| email | password | worker |
+|---|---|---|
+| `admin@sapana.local` | `Validation@123` | `worker-admin` (role `ADMIN`, `EMP-ADMIN`) |
+
+- The account must exist as a live Supabase Auth user with the password above.
+- The password was aligned to the actual live credential during Slice 10A.5-R / 10A.5-RV,
+  superseding the previously documented `Password123!`.
+- Do not change this password in the live project without updating this document and the
+  operational harness scenarios (`validation/operational/scenarios/ov2..ov5` + `AuthFixture`).
+- The auth user id in the live project (as verified 2026-08-11) is `69d4e016-121e-4d62-b3ab-562efabda5ea`.

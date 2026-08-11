@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { AuthenticationEngine, AuthenticationErrorCode } from '../../modules/authentication';
+import { AuthSession } from '../../modules/auth-session';
+import { AuthenticationErrorCode } from '../../modules/authentication';
 
 interface LoginScreenProps {
   onAuthenticated: () => void;
@@ -41,7 +42,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthenticated }) => {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await AuthenticationEngine.login(email.trim(), password);
+      const result = await AuthSession.login(email.trim(), password);
       if (result.success) {
         onAuthenticated();
       } else {
