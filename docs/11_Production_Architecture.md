@@ -379,6 +379,15 @@ The bootstrap entry point is single-flight:
 
 React StrictMode development double-invocation therefore executes at most one bootstrap sequence and reaches `READY` once. The shell serializes bootstrap and does not duplicate `StorageEngine`'s single-flight implementation.
 
+### Identity Resolution Boundary (ADR-014)
+
+`IdentityResolver` (`modules/identity-resolution/`) is the application-boundary owner that resolves the identity state consumed by the Device Verification flow. It is stateless — it performs no initialization and owns no lifecycle. It composes existing public contracts:
+
+- **Authenticated worker identity**: `UserContextEngine.currentWorker()` (populated by `AuthSession` on login/restore — the single authoritative source of the currently authenticated worker).
+- **Authoritative device identity availability**: `TrustedDeviceEngine.device()` combined with `selectDeviceIdentityProvider().kind`. A device identity is authoritative for trusted-device purposes **only** when the active provider is native (Capacitor/Android `ANDROID_ID`). The browser provider is explicitly development/test only.
+
+Resolved states: `UNAUTHENTICATED` / `AUTHENTICATED_DEVICE_AVAILABLE` / `AUTHENTICATED_DEVICE_UNAVAILABLE` / `RESOLUTION_FAILED`. When running in a browser, the device identity is reported as **unavailable**, so the Device Verification UI keeps trusted-device registration unavailable — the browser never silently registers itself as a trusted Android device. Trusted-device enforcement (registration, verification, administrator reset) remains owned by `TrustedDeviceRegistrationEngine` / `TrustedDeviceRepository`; resolution and enforcement are deliberately separated.
+
 ### Platform Runtime Contract
 
 > Platform runtime dependencies (Capacitor plugins, SQLite, Camera, Background Tasks, GPS, etc.) must have their platform bootstrap validated independently before any application architecture is modified.

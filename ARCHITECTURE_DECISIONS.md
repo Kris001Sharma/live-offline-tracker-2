@@ -110,3 +110,15 @@ This document records the key architectural decisions made for the Sapana Live T
   5. A failed bootstrap rejects, transitions to `ERROR`, keeps the error observable, and permits a fresh retry.
 - **Status**: Approved
 
+---
+
+## ADR-014: Identity Resolution Boundary — Browser Is Never an Authoritative Trusted Device
+
+- **Decision**: A dedicated application-boundary owner (`IdentityResolver`, module `modules/identity-resolution/`) resolves the identity state consumed by the Device Verification flow. It composes the authenticated worker identity (from `UserContextEngine`, populated by `AuthSession` on login/restore) with device-identity availability (from `TrustedDeviceEngine` + `selectDeviceIdentityProvider()`). A device identity is authoritative for trusted-device purposes **only** when the active provider is native (Capacitor/Android `ANDROID_ID`). The browser provider is explicitly development/test only and is never treated as an authoritative device identity: when running in a browser, the resolved state reports the device identity as **unavailable**, and the Device Verification UI keeps trusted-device registration unavailable. The browser never silently registers itself as a trusted Android device.
+- **Reason**: Slice 10A.5-D demonstrated that a browser cannot provide the authoritative native Android device identity required for trusted-device registration. Rather than fabricating an identity or making browser registration succeed, the application explicitly separates identity resolution ("who is authenticated" + "is an authoritative device identity available") from trusted-device enforcement (registration/verification/admin reset against approved device records). This preserves native Android as the sole authoritative device-identity target and keeps browser development usable without fake trusted-device registration.
+- **Rules**:
+  1. Identity resolution is application/domain-owned and stateless. The router and React components must consume the resolved state through the `IdentityResolver` public contract and must not read engine/platform internals directly; nothing may initialize the resolver (it owns no lifecycle).
+  2. Browser-generated identifiers (user-agent strings, fingerprints, random or per-profile pseudo-device IDs) are never substitutes for the native device identity and never authorize trusted-device registration.
+  3. Trusted-device enforcement (registration, verification, administrator reset) remains owned by `TrustedDeviceRegistrationEngine` / `TrustedDeviceRepository`; this ADR does not relocate enforcement.
+- **Status**: Approved (Slice 10A.5-W)
+

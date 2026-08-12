@@ -4,18 +4,31 @@ import {
   DeviceVerificationState,
   TrustedDeviceRegistrationResultCode
 } from '../../modules/trusted-device-registration';
+import { IdentityResolver, IdentityResolutionState } from '../../modules/identity-resolution';
 
-type VerificationPhase = 'checking' | 'not_registered' | 'trusted' | 'different_device' | 'error';
+type VerificationPhase =
+  | 'checking'
+  | 'device_unavailable'
+  | 'not_registered'
+  | 'trusted'
+  | 'different_device'
+  | 'error';
 
 /**
- * Device Verification Gate (Slice 10A.5-D minimal UI wiring).
+ * Device Verification Gate (Slice 10A.5-D minimal UI wiring, Slice 10A.5-W
+ * identity-resolution boundary).
  *
- * Consumes the TrustedDeviceRegistrationEngine public contract to prove the
- * trusted-device flow in the browser:
- * - State A (no active trusted device): prompt to register this device.
- * - State B (current device trusted): continue to the post-login screen.
- * - State C (another device already trusted): blocked, contact administrator.
- * - State D (error): clear non-technical error.
+ * Resolves the application identity boundary first (IdentityResolver):
+ * - AUTHENTICATED_DEVICE_AVAILABLE: consume the TrustedDeviceRegistrationEngine
+ *   contract for the trusted-device states:
+ *   - State A (no active trusted device): prompt to register this device.
+ *   - State B (current device trusted): continue to the post-login screen.
+ *   - State C (another device already trusted): blocked, contact administrator.
+ *   - State D (error): clear non-technical error.
+ * - AUTHENTICATED_DEVICE_UNAVAILABLE: the browser provides no authoritative
+ *   device identity, so trusted-device registration stays unavailable. The
+ *   browser never silently registers itself as a trusted Android device.
+ * - RESOLUTION_FAILED / UNAUTHENTICATED: clear non-technical error.
  *
  * A Sign Out control is offered in every non-trusted state so a worker on an
  * unverified, blocked, or errored device is never stuck on the screen.
@@ -42,8 +55,23 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   };
 
   const checkStatus = async (): Promise<void> => {
-    const result = await TrustedDeviceRegistrationEngine.status();
-    applyVerification(result.verification);
+    const identity = IdentityResolver.resolve();
+
+    switch (identity.state) {
+      case IdentityResolutionState.AUTHENTICATED_DEVICE_AVAILABLE: {
+        const result = await TrustedDeviceRegistrationEngine.status();
+        applyVerification(result.verification);
+        break;
+      }
+      case IdentityResolutionState.AUTHENTICATED_DEVICE_UNAVAILABLE:
+        setPhase('device_unavailable');
+        break;
+      case IdentityResolutionState.UNAUTHENTICATED:
+      case IdentityResolutionState.RESOLUTION_FAILED:
+      default:
+        setPhase('error');
+        break;
+    }
   };
 
   useEffect(() => {
@@ -81,6 +109,29 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
         <div className="flex items-center gap-3 text-neutral-400">
           <div className="w-4 h-4 border-2 border-neutral-400 border-t-emerald-500 rounded-full animate-spin"></div>
           <span className="text-sm font-mono">Checking device...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'device_unavailable') {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <button
+            onClick={onSignOut}
+            className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded font-mono text-sm transition-colors border border-neutral-700"
+          >
+            Sign Out
+          </button>
+        </div>
+        <div className="text-center space-y-2">
+          <div className="text-neutral-100 font-mono text-sm">
+            Trusted-device verification is not available in this development environment.
+          </div>
+          <div className="text-neutral-400 font-mono text-sm">
+            Register your trusted device from the native Android app to continue.
+          </div>
         </div>
       </div>
     );
