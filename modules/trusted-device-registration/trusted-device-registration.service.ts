@@ -83,11 +83,17 @@ export const TrustedDeviceRegistrationEngine = {
   },
 
   async status(): Promise<RegistrationStatus> {
+    console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: START');
     try {
       const worker = UserContextEngine.currentWorker();
       const device = TrustedDeviceEngine.device();
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: inputs', {
+        worker: worker ? { id: worker.id, email: worker.email } : null,
+        device: device ? { deviceId: device.deviceId, platform: device.platform } : null
+      });
 
       if (!isValidWorker(worker) || !isValidDevice(device)) {
+        console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: PRECONDITION NOT MET (invalid worker or device)');
         return deepCloneAndFreeze({
           status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
           verification: DeviceVerificationState.ERROR
@@ -96,6 +102,10 @@ export const TrustedDeviceRegistrationEngine = {
 
       const thisDevice = await TrustedDeviceRepository.findByWorkerAndDevice(worker!.id, device!.deviceId);
       const approvedDevice = await TrustedDeviceRepository.findApprovedByWorker(worker!.id);
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: repository lookup', {
+        thisDevice: thisDevice ? { status: thisDevice.status } : null,
+        approvedDevice: approvedDevice ? { deviceId: approvedDevice.deviceId } : null
+      });
 
       // No active trusted device for this worker.
       if (!approvedDevice) {
@@ -123,6 +133,7 @@ export const TrustedDeviceRegistrationEngine = {
         verification: DeviceVerificationState.DIFFERENT_DEVICE
       });
     } catch (e) {
+      console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: ERROR', e);
       return deepCloneAndFreeze({
         status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
         verification: DeviceVerificationState.ERROR
@@ -131,12 +142,15 @@ export const TrustedDeviceRegistrationEngine = {
   },
 
   async registerCurrentDevice(): Promise<TrustedDeviceRegistrationResult> {
+    console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: START');
     try {
       transientRegistrationState = { stage: 'EVALUATING', timestamp: new Date().toISOString() };
 
       // Defensive Runtime Validation: Worker check
       const worker = UserContextEngine.currentWorker();
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: worker', worker ? { id: worker.id, email: worker.email } : null);
       if (!isValidWorker(worker)) {
+        console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: PRECONDITION_FAILED (invalid worker)');
         rollbackRegistration();
         return deepCloneAndFreeze({
           success: false,
@@ -147,7 +161,9 @@ export const TrustedDeviceRegistrationEngine = {
 
       // Defensive Runtime Validation: Device check
       const device = TrustedDeviceEngine.device();
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: device', device);
       if (!isValidDevice(device)) {
+        console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: PRECONDITION_FAILED (invalid device)');
         rollbackRegistration();
         return deepCloneAndFreeze({
           success: false,
@@ -158,9 +174,11 @@ export const TrustedDeviceRegistrationEngine = {
 
       // Repository Ownership: Lookup existing registration for worker and device
       const thisDeviceRegistration = await TrustedDeviceRepository.findByWorkerAndDevice(worker!.id, device!.deviceId);
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: thisDeviceRegistration', thisDeviceRegistration);
 
       if (thisDeviceRegistration) {
         if (thisDeviceRegistration.status === 'APPROVED') {
+          console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: ALREADY APPROVED');
           rollbackRegistration();
           return deepCloneAndFreeze({
             success: true,
@@ -168,6 +186,7 @@ export const TrustedDeviceRegistrationEngine = {
           });
         }
         if (thisDeviceRegistration.status === 'REJECTED') {
+          console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: REJECTED');
           rollbackRegistration();
           return deepCloneAndFreeze({
             success: false,
@@ -179,7 +198,9 @@ export const TrustedDeviceRegistrationEngine = {
 
       // Repository Ownership: Check if worker already has an active trusted device (different device)
       const approvedDevice = await TrustedDeviceRepository.findApprovedByWorker(worker!.id);
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: approvedDevice', approvedDevice);
       if (approvedDevice) {
+        console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: DEVICE_MISMATCH');
         rollbackRegistration();
         return deepCloneAndFreeze({
           success: false,
@@ -192,6 +213,7 @@ export const TrustedDeviceRegistrationEngine = {
       const uuid = typeof crypto !== 'undefined' && crypto.randomUUID 
         ? crypto.randomUUID() 
         : Math.random().toString(36).substring(2, 15);
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: registering', { workerId: worker!.id, deviceId: device!.deviceId, uuid });
 
       await TrustedDeviceRepository.registerActive({
         id: uuid,
@@ -205,6 +227,7 @@ export const TrustedDeviceRegistrationEngine = {
       });
 
       transientRegistrationState = null;
+      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: SUCCESS');
 
       return deepCloneAndFreeze({
         success: true,
@@ -212,6 +235,7 @@ export const TrustedDeviceRegistrationEngine = {
       });
 
     } catch (error: any) {
+      console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: PERSISTENCE_ERROR', error);
       rollbackRegistration();
       return deepCloneAndFreeze({
         success: false,

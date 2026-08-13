@@ -5,6 +5,7 @@ import {
   TrustedDeviceRegistrationResultCode
 } from '../../modules/trusted-device-registration';
 import { IdentityResolver, IdentityResolutionState } from '../../modules/identity-resolution';
+import NativeDeviceDiagnostics from '../shell/NativeDeviceDiagnostics';
 
 type VerificationPhase =
   | 'checking'
@@ -36,7 +37,17 @@ type VerificationPhase =
 const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: () => void }> = ({ children, onSignOut }) => {
   const [phase, setPhase] = useState<VerificationPhase>('checking');
   const [registering, setRegistering] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const checkRef = useRef<Promise<void> | null>(null);
+
+  const diagnosticsButton = (
+    <button
+      onClick={() => setShowDiagnostics(v => !v)}
+      className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded font-mono text-xs border border-neutral-700"
+    >
+      {showDiagnostics ? 'Hide Diagnostics' : 'Show Diagnostics'}
+    </button>
+  );
 
   const applyVerification = (verification: DeviceVerificationState): void => {
     switch (verification) {
@@ -55,23 +66,29 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   };
 
   const checkStatus = async (): Promise<void> => {
+    console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: START');
     const identity = IdentityResolver.resolve();
+    console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: identity resolved', identity);
 
     switch (identity.state) {
       case IdentityResolutionState.AUTHENTICATED_DEVICE_AVAILABLE: {
         const result = await TrustedDeviceRegistrationEngine.status();
+        console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: registration status', result);
         applyVerification(result.verification);
         break;
       }
       case IdentityResolutionState.AUTHENTICATED_DEVICE_UNAVAILABLE:
+        console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: AUTHENTICATED_DEVICE_UNAVAILABLE');
         setPhase('device_unavailable');
         break;
       case IdentityResolutionState.UNAUTHENTICATED:
       case IdentityResolutionState.RESOLUTION_FAILED:
       default:
+        console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: error/resolution_failed');
         setPhase('error');
         break;
     }
+    console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: END phase=' + phase);
   };
 
   useEffect(() => {
@@ -90,25 +107,34 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
     if (registering) {
       return;
     }
+    console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: START');
     setRegistering(true);
     const result = await TrustedDeviceRegistrationEngine.registerCurrentDevice();
+    console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: result', result);
     setRegistering(false);
 
     if (result.success) {
+      console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: SUCCESS, rechecking');
       await checkStatus();
     } else if (result.code === TrustedDeviceRegistrationResultCode.DEVICE_MISMATCH) {
+      console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: DEVICE_MISMATCH');
       setPhase('different_device');
     } else {
+      console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: ERROR phase');
       setPhase('error');
     }
   };
 
   if (phase === 'checking') {
     return (
-      <div className="text-center">
-        <div className="flex items-center gap-3 text-neutral-400">
-          <div className="w-4 h-4 border-2 border-neutral-400 border-t-emerald-500 rounded-full animate-spin"></div>
-          <span className="text-sm font-mono">Checking device...</span>
+      <div className="space-y-4">
+        <div className="flex justify-end">{diagnosticsButton}</div>
+        {showDiagnostics && <NativeDeviceDiagnostics />}
+        <div className="text-center">
+          <div className="flex items-center gap-3 text-neutral-400">
+            <div className="w-4 h-4 border-2 border-neutral-400 border-t-emerald-500 rounded-full animate-spin"></div>
+            <span className="text-sm font-mono">Checking device...</span>
+          </div>
         </div>
       </div>
     );
@@ -117,6 +143,8 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   if (phase === 'device_unavailable') {
     return (
       <div className="space-y-4">
+        <div className="flex justify-end">{diagnosticsButton}</div>
+        {showDiagnostics && <NativeDeviceDiagnostics />}
         <div className="flex justify-end">
           <button
             onClick={onSignOut}
@@ -140,6 +168,8 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   if (phase === 'different_device') {
     return (
       <div className="space-y-4">
+        <div className="flex justify-end">{diagnosticsButton}</div>
+        {showDiagnostics && <NativeDeviceDiagnostics />}
         <div className="flex justify-end">
           <button
             onClick={onSignOut}
@@ -163,6 +193,8 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   if (phase === 'error') {
     return (
       <div className="space-y-4">
+        <div className="flex justify-end">{diagnosticsButton}</div>
+        {showDiagnostics && <NativeDeviceDiagnostics />}
         <div className="flex justify-end">
           <button
             onClick={onSignOut}
@@ -183,6 +215,8 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   if (phase === 'not_registered') {
     return (
       <div className="space-y-4">
+        <div className="flex justify-end">{diagnosticsButton}</div>
+        {showDiagnostics && <NativeDeviceDiagnostics />}
         <div className="flex justify-end">
           <button
             onClick={onSignOut}
@@ -209,6 +243,8 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">{diagnosticsButton}</div>
+      {showDiagnostics && <NativeDeviceDiagnostics />}
       <div className="text-center">
         <div className="text-emerald-400 font-mono text-sm">
           Trusted device verified.

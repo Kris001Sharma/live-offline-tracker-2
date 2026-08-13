@@ -18,19 +18,29 @@ export const nativeDeviceIdentityProvider: DeviceIdentityProvider = {
   developmentOnly: false,
 
   async getIdentity(): Promise<TrustedDeviceIdentity> {
-    const deviceIdInfo = await Device.getId();
-    const deviceInfo = await Device.getInfo();
+    console.log('[NativeIdentityDiag] nativeDeviceIdentityProvider.getIdentity: START');
+    try {
+      const deviceIdInfo = await Device.getId();
+      console.log('[NativeIdentityDiag] nativeDeviceIdentityProvider.getIdentity: Device.getId SUCCESS', deviceIdInfo);
+      const deviceInfo = await Device.getInfo();
+      console.log('[NativeIdentityDiag] nativeDeviceIdentityProvider.getIdentity: Device.getInfo SUCCESS', deviceInfo);
 
-    const appVersion = (import.meta as any).env?.VITE_APP_VERSION || 'unknown';
+      const appVersion = (import.meta as any).env?.VITE_APP_VERSION || 'unknown';
 
-    return {
-      deviceId: deviceIdInfo.identifier,
-      manufacturer: deviceInfo.manufacturer,
-      model: deviceInfo.model,
-      platform: deviceInfo.platform,
-      operatingSystem: deviceInfo.operatingSystem,
-      operatingSystemVersion: deviceInfo.osVersion,
-      appVersion: appVersion
-    };
+      const result = {
+        deviceId: deviceIdInfo.identifier,
+        manufacturer: deviceInfo.manufacturer,
+        model: deviceInfo.model,
+        platform: deviceInfo.platform,
+        operatingSystem: deviceInfo.operatingSystem,
+        operatingSystemVersion: deviceInfo.osVersion,
+        appVersion: appVersion
+      };
+      console.log('[NativeIdentityDiag] nativeDeviceIdentityProvider.getIdentity: RESULT', result);
+      return result;
+    } catch (error: any) {
+      console.error('[NativeIdentityDiag] nativeDeviceIdentityProvider.getIdentity: ERROR', error);
+      throw error;
+    }
   }
 };

@@ -94,36 +94,45 @@ export const TrustedDeviceEngine = {
   },
 
   async load(): Promise<TrustedDeviceResult> {
+    console.log('[NativeIdentityDiag] TrustedDeviceEngine.load: START', { initialized, state });
     try {
       if (!initialized) {
+        console.error('[NativeIdentityDiag] TrustedDeviceEngine.load: NOT INITIALIZED');
         throw new Error('Trusted Device Engine is not initialized');
       }
 
       if (state === TrustedDeviceState.READY && currentDevice) {
+        console.log('[NativeIdentityDiag] TrustedDeviceEngine.load: ALREADY READY');
         return Object.freeze({ success: true });
       }
 
       if (state !== TrustedDeviceState.EMPTY && state !== TrustedDeviceState.CLEARED) {
+        console.error('[NativeIdentityDiag] TrustedDeviceEngine.load: INVALID STATE', state);
         throw new Error(`Trusted Device Engine: Cannot load from state ${state}`);
       }
 
       transitionTo(TrustedDeviceState.LOADING);
+      console.log('[NativeIdentityDiag] TrustedDeviceEngine.load: LOADING');
 
       const provider = selectDeviceIdentityProvider();
+      console.log('[NativeIdentityDiag] TrustedDeviceEngine.load: provider selected', { kind: provider.kind, developmentOnly: provider.developmentOnly });
       const rawDevice = await provider.getIdentity();
+      console.log('[NativeIdentityDiag] TrustedDeviceEngine.load: rawDevice received', rawDevice);
 
       if (!validateDevice(rawDevice)) {
+        console.error('[NativeIdentityDiag] TrustedDeviceEngine.load: VALIDATION FAILED', rawDevice);
         throw new Error('Mandatory device information is missing');
       }
 
-      // Atomic Assignment
       currentDevice = deepCloneAndFreeze(rawDevice);
       lastLoadedAt = new Date().toISOString();
 
       transitionTo(TrustedDeviceState.READY);
+      console.log('[NativeIdentityDiag] TrustedDeviceEngine.load: SUCCESS READY', { deviceId: currentDevice.deviceId, platform: currentDevice.platform });
 
       return Object.freeze({ success: true });
     } catch (error: any) {
+      console.error('[NativeIdentityDiag] TrustedDeviceEngine.load: FAILED', error);
       clearInternal(); // Reverts to CLEARED
       return Object.freeze({
         success: false,
@@ -138,6 +147,7 @@ export const TrustedDeviceEngine = {
   },
 
   status(): TrustedDeviceStatus {
+    console.log('[NativeIdentityDiag] TrustedDeviceEngine.status:', { initialized, state, lastLoadedAt, hasDevice: !!currentDevice });
     if (!initialized) {
       return DEFAULT_STATUS;
     }
@@ -149,15 +159,14 @@ export const TrustedDeviceEngine = {
   },
 
   device(): TrustedDeviceIdentity | null {
-    if (state !== TrustedDeviceState.READY) {
-      return null;
-    }
-    if (!currentDevice) {
-      return null;
-    }
-    if (!validateDevice(currentDevice)) {
-      return null;
-    }
-    return currentDevice;
+    const result = state !== TrustedDeviceState.READY ? null : (!currentDevice ? null : (!validateDevice(currentDevice) ? null : currentDevice));
+    console.log('[NativeIdentityDiag] TrustedDeviceEngine.device:', {
+      state,
+      hasCurrentDevice: !!currentDevice,
+      valid: result !== null,
+      deviceId: result?.deviceId,
+      platform: result?.platform
+    });
+    return result;
   }
 };

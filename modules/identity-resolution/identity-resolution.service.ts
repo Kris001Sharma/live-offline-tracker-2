@@ -51,15 +51,20 @@ export const IdentityResolver = {
    * Synchronous composition of existing public APIs; never rejects.
    */
   resolve(): IdentityResolution {
+    console.log('[NativeIdentityDiag] IdentityResolver.resolve: START');
     try {
       const worker = UserContextEngine.currentWorker();
+      console.log('[NativeIdentityDiag] IdentityResolver.resolve: worker', worker ? { id: worker.id, email: worker.email } : null);
 
       if (!worker) {
+        console.log('[NativeIdentityDiag] IdentityResolver.resolve: UNAUTHENTICATED');
         return deepFreeze({ state: IdentityResolutionState.UNAUTHENTICATED });
       }
 
       const trustedDeviceStatus = TrustedDeviceEngine.status();
+      console.log('[NativeIdentityDiag] IdentityResolver.resolve: trustedDeviceStatus', trustedDeviceStatus);
       if (!trustedDeviceStatus.initialized) {
+        console.log('[NativeIdentityDiag] IdentityResolver.resolve: RESOLUTION_FAILED (not initialized)');
         return deepFreeze({
           state: IdentityResolutionState.RESOLUTION_FAILED,
           workerId: worker.id,
@@ -69,13 +74,16 @@ export const IdentityResolver = {
       }
 
       const provider = selectDeviceIdentityProvider();
+      console.log('[NativeIdentityDiag] IdentityResolver.resolve: provider', { kind: provider.kind, developmentOnly: provider.developmentOnly });
       const device = TrustedDeviceEngine.device();
+      console.log('[NativeIdentityDiag] IdentityResolver.resolve: device', device);
 
       // An authoritative device identity is available only when the runtime
       // provides a real native identity (Capacitor/Android ANDROID_ID). The
       // browser provider is explicitly development/test only and is never
       // treated as an authoritative trusted-device identity.
       if (device !== null && provider.kind === 'native') {
+        console.log('[NativeIdentityDiag] IdentityResolver.resolve: AUTHENTICATED_DEVICE_AVAILABLE');
         return deepFreeze({
           state: IdentityResolutionState.AUTHENTICATED_DEVICE_AVAILABLE,
           workerId: worker.id,
@@ -84,6 +92,7 @@ export const IdentityResolver = {
         });
       }
 
+      console.log('[NativeIdentityDiag] IdentityResolver.resolve: AUTHENTICATED_DEVICE_UNAVAILABLE');
       // Authenticated worker but no authoritative device identity:
       // - browser: a dev/test browser identity may exist, but it is NOT
       //   authoritative, so trusted-device availability is explicitly false.
@@ -96,6 +105,7 @@ export const IdentityResolver = {
         deviceIdentityDevelopmentOnly: provider.developmentOnly
       });
     } catch (error) {
+      console.error('[NativeIdentityDiag] IdentityResolver.resolve: RESOLUTION_FAILED (exception)', error);
       return deepFreeze({
         state: IdentityResolutionState.RESOLUTION_FAILED,
         message: error instanceof Error ? error.message : String(error)

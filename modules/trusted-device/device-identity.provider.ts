@@ -17,5 +17,12 @@ export { nativeDeviceIdentityProvider } from './device-identity.native';
  *   explicitly development-only.
  */
 export function selectDeviceIdentityProvider(): DeviceIdentityProvider {
-  return Capacitor.isNativePlatform() ? nativeDeviceIdentityProvider : browserDeviceIdentityProvider;
+  const provider = Capacitor.isNativePlatform() ? nativeDeviceIdentityProvider : browserDeviceIdentityProvider;
+  console.log('[NativeIdentityDiag] selectDeviceIdentityProvider:', {
+    isNative: Capacitor.isNativePlatform(),
+    platform: Capacitor.getPlatform(),
+    selectedKind: provider.kind,
+    developmentOnly: provider.developmentOnly
+  });
+  return provider;
 }
