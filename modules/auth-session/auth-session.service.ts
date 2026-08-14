@@ -1,5 +1,6 @@
 import { AuthenticationEngine, AuthenticatedUser, AuthenticationState } from '../authentication';
 import { UserContextEngine, CurrentWorker, WorkerRole } from '../user-context';
+import { WorkerRepository } from '../repositories';
 import { AuthSessionStatus, AuthSessionResult } from './auth-session.types';
 
 let initialized = false;
@@ -29,6 +30,23 @@ async function rollbackSession(): Promise<void> {
     // Ignore rollback errors
   } finally {
     UserContextEngine.clear();
+  }
+}
+
+async function materializeWorker(worker: CurrentWorker): Promise<void> {
+  try {
+    const existing = await WorkerRepository.findById(worker.id);
+    if (!existing) {
+      await WorkerRepository.create({
+        workerId: worker.id,
+        email: worker.email,
+        displayName: worker.displayName,
+        role: worker.role,
+        active: worker.active
+      });
+    }
+  } catch (error) {
+    // Non-blocking: login/restore must not fail because local worker persistence failed.
   }
 }
 
@@ -84,6 +102,8 @@ export const AuthSession = {
       if (!UserContextEngine.isAuthenticated() || AuthenticationEngine.status().state !== AuthenticationState.AUTHENTICATED) {
          throw new Error('Failed to establish complete session');
       }
+
+      await materializeWorker(worker);
 
       lastLoginAt = new Date().toISOString();
       return Object.freeze({ success: true });
@@ -149,6 +169,8 @@ export const AuthSession = {
       if (!UserContextEngine.isAuthenticated() || AuthenticationEngine.status().state !== AuthenticationState.AUTHENTICATED) {
          throw new Error('Partial session state after restore');
       }
+
+      await materializeWorker(worker);
 
       lastRestoreAt = new Date().toISOString();
       return Object.freeze({ success: true });
