@@ -1,23 +1,25 @@
 import { ConnectivityEngine } from '../connectivity';
-import { 
-  TrustedDeviceRepository, 
-  AttendanceRepository, 
-  EventRepository 
+import {
+  TrustedDeviceRepository,
+  AttendanceRepository,
+  EventRepository
 } from '../repositories';
-import { 
-  SyncState, 
-  SyncStatus, 
-  SyncResult, 
+import {
+  SyncState,
+  SyncStatus,
+  SyncResult,
   SyncErrorCode,
   ConflictPolicy,
   SyncConflictResult
 } from './sync.types';
-import { 
-  DEFAULT_SYNC_STATUS, 
-  MAX_RETRIES, 
-  BASE_RETRY_DELAY, 
-  MAX_RETRY_DELAY 
+import {
+  DEFAULT_SYNC_STATUS,
+  MAX_RETRIES,
+  BASE_RETRY_DELAY,
+  MAX_RETRY_DELAY
 } from './sync.constants';
+import { TrustedDeviceSyncProvider } from '../trusted-device-sync/trusted-device-sync.types';
+import { TrustedDeviceRecord } from '../repositories/trusted-device/trusted-device.repository.types';
 
 /**
  * Offline Synchronization Engine
@@ -75,6 +77,9 @@ let retryCount: number = 0;
 let lastRetryAt: string | undefined;
 let nextRetryDelay: number | undefined;
 let lastRetryReason: string | undefined;
+
+// Trusted Device Sync Provider
+let trustedDeviceSyncProvider: TrustedDeviceSyncProvider | null = null;
 
 // Rollback state
 let previousState: SyncState = SyncState.STOPPED;
@@ -246,6 +251,19 @@ const UPLOAD_PIPELINE: readonly SyncStage[] = deepCloneAndFreeze([
     name: 'Trusted Device Registration',
     execute: async () => {
       const pending = await TrustedDeviceRepository.findPending();
+      if (trustedDeviceSyncProvider && pending.length > 0) {
+        try {
+          await trustedDeviceSyncProvider.uploadTrustedDevices(pending);
+          // Mark all pending records as synced after successful upload
+          for (const record of pending) {
+            await TrustedDeviceRepository.markSynced(record.id);
+          }
+          return { uploaded: pending.length, remaining: 0 };
+        } catch (error) {
+          // If upload fails, return 0 uploaded so it can be retried
+          return { uploaded: 0, remaining: pending.length };
+        }
+      }
       return { uploaded: 0, remaining: pending.length };
     }
   },
@@ -289,9 +307,10 @@ async function executePipeline(): Promise<{ success: boolean, totalUploaded: num
 
 export const SyncEngine = {
   evaluateConflict,
-  initialize(): void {
+  initialize(trustedDeviceSyncProviderParam?: TrustedDeviceSyncProvider): void {
     clearInternal();
     saveStateForRollback();
+    trustedDeviceSyncProvider = trustedDeviceSyncProviderParam ?? null;
   },
 
   async start(): Promise<SyncResult> {

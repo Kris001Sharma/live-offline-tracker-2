@@ -1,15 +1,15 @@
 import { StorageEngine } from '../../storage';
-import { 
-  TrustedDeviceRecord, 
-  TrustedDeviceRegistrationData, 
-  TrustedDeviceStatus, 
+import {
+  TrustedDeviceRecord,
+  TrustedDeviceRegistrationData,
+  TrustedDeviceStatus,
   SyncStatus,
   TrustedDeviceRepositoryError
 } from './trusted-device.repository.types';
 
 /**
  * Trusted Device Repository
- * 
+ *
  * Architectural Responsibilities:
  * - Repository owns SQL queries, schema interactions, and persistence operations.
  * - Repository owns database lookup queries and integrity rules (e.g. approved device lookups, duplicate checks).
@@ -21,7 +21,7 @@ function mapRowToRecord(row: any): TrustedDeviceRecord {
   return {
     id: row.id,
     workerId: row.worker_id,
-    deviceId: row.device_id,
+    deviceId: row.deviceId,
     manufacturer: row.manufacturer,
     model: row.model,
     platform: row.platform,
@@ -46,7 +46,7 @@ export const TrustedDeviceRepository = {
       const now = new Date().toISOString();
       const status: TrustedDeviceStatus = 'PENDING_APPROVAL';
       const syncStatus: SyncStatus = 'PENDING';
-      
+
       await StorageEngine.execute(`
         INSERT INTO trusted_devices (
           id, worker_id, device_id, manufacturer, model, platform, app_version,
@@ -236,11 +236,12 @@ export const TrustedDeviceRepository = {
 
   /**
    * Find all pending registration requests across all devices and workers.
+   * FIXED: Now correctly queries sync_status = 'PENDING' instead of status = 'PENDING_APPROVAL'
    */
   async findPending(): Promise<TrustedDeviceRecord[]> {
     try {
       const result = await StorageEngine.execute(`
-        SELECT * FROM trusted_devices WHERE status = 'PENDING_APPROVAL' ORDER BY created_at ASC
+        SELECT * FROM trusted_devices WHERE sync_status = 'PENDING' ORDER BY created_at ASC
       `);
       return result.rows.map(mapRowToRecord);
     } catch (error) {
@@ -250,11 +251,12 @@ export const TrustedDeviceRepository = {
 
   /**
    * Find pending registration requests for a specific worker.
+   * FIXED: Now correctly queries sync_status = 'PENDING' instead of status = 'PENDING_APPROVAL'
    */
   async findPendingByWorker(workerId: string): Promise<TrustedDeviceRecord[]> {
     try {
       const result = await StorageEngine.execute(`
-        SELECT * FROM trusted_devices WHERE worker_id = ? AND status = 'PENDING_APPROVAL' ORDER BY created_at ASC
+        SELECT * FROM trusted_devices WHERE worker_id = ? AND sync_status = 'PENDING' ORDER BY created_at ASC
       `, [workerId]);
       return result.rows.map(mapRowToRecord);
     } catch (error) {

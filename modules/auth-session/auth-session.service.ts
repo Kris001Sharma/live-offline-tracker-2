@@ -2,6 +2,8 @@ import { AuthenticationEngine, AuthenticatedUser, AuthenticationState } from '..
 import { UserContextEngine, CurrentWorker, WorkerRole } from '../user-context';
 import { WorkerRepository } from '../repositories';
 import { AuthSessionStatus, AuthSessionResult } from './auth-session.types';
+import { TrustedDeviceSyncEngine } from '../trusted-device-sync/trusted-device-sync.service';
+import { SyncEngine } from '../sync/sync.service';
 
 let initialized = false;
 let lastLoginAt: string | undefined;
@@ -90,14 +92,14 @@ export const AuthSession = {
       }
 
       const worker = mapToWorker(authUser);
-      
+
       // Atomic Session Construction
       if (!worker.id || !worker.email || !worker.role || !worker.displayName) {
         throw new Error('Invalid worker mapping. Missing required fields.');
       }
 
       UserContextEngine.setCurrentWorker(worker);
-      
+
       // Validate both are populated
       if (!UserContextEngine.isAuthenticated() || AuthenticationEngine.status().state !== AuthenticationState.AUTHENTICATED) {
          throw new Error('Failed to establish complete session');
@@ -105,14 +107,26 @@ export const AuthSession = {
 
       await materializeWorker(worker);
 
+      // Initialize and configure trusted device sync with Supabase
+      TrustedDeviceSyncEngine.initialize();
+      SyncEngine.initialize(TrustedDeviceSyncEngine);
+
+      // Trigger trusted device synchronization (non-blocking to login response)
+      // This ensures the trusted device is synced to supervisor after login
+      TrustedDeviceSyncEngine.syncTrustedDevice().catch(error => {
+        // Log synchronization errors but don't block login
+        console.error('[TrustDeviceSync] Synchronization failed:', error);
+      });
+
       lastLoginAt = new Date().toISOString();
       return Object.freeze({ success: true });
     } catch (error: any) {
       await rollbackSession();
-      
+
       return Object.freeze({
         success: false,
-        error: error.message || String(error)
+        error: error.message || String(error),
+        errorCode: undefined
       });
     }
   },
@@ -158,7 +172,7 @@ export const AuthSession = {
       }
 
       const worker = mapToWorker(authUser);
-      
+
       if (!worker.id || !worker.email || !worker.role || !worker.displayName) {
         throw new Error('Invalid worker mapping during restore');
       }
@@ -172,20 +186,33 @@ export const AuthSession = {
 
       await materializeWorker(worker);
 
+      // Initialize and configure trusted device sync with Supabase
+      TrustedDeviceSyncEngine.initialize();
+      SyncEngine.initialize(TrustedDeviceSyncEngine);
+
+      // Trigger trusted device synchronization (non-blocking to login response)
+      // This ensures the trusted device is synced to supervisor after session restore
+      TrustedDeviceSyncEngine.syncTrustedDevice().catch(error => {
+        // Log synchronization errors but don't block login/restore
+        console.error('[TrustDeviceSync] Synchronization failed:', error);
+      });
+
       lastRestoreAt = new Date().toISOString();
       return Object.freeze({ success: true });
     } catch (error: any) {
       await rollbackSession();
+
       return Object.freeze({
         success: false,
-        error: error.message || String(error)
+        error: error.message || String(error),
+        errorCode: undefined
       });
     }
   },
 
   status(): AuthSessionStatus {
     const userContextStatus = UserContextEngine.status();
-    
+
     // Frozen Session Status
     return deepFreeze({
       initialized,
