@@ -220,6 +220,28 @@ The system must be:
 
 ---
 
+# Investigation Methodology
+
+## Earliest-Divergence Investigation
+
+When a multi-layer workflow fails, investigation must identify the **earliest verified divergence from the expected state** rather than beginning from the final downstream error.
+
+Required investigation sequence:
+1. Reproduce the failure.
+2. Collect runtime evidence.
+3. Identify the expected state at each boundary.
+4. Trace the actual value/state through each boundary.
+5. Identify the first verified divergence.
+6. Determine which architectural layer owns that divergence.
+7. Repair only that layer.
+8. Re-run validation across the complete affected path.
+
+Do not infer root cause from the final database, network, synchronization, or UI error alone.
+
+The Trusted Device investigation demonstrated why this matters: the final Supabase constraint failure appeared to be a remote synchronization problem, while the actual defect was a single local repository column-mapping error.
+
+---
+
 # Success Criteria
 
 The MVP is considered successful when:

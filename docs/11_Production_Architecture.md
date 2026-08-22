@@ -306,6 +306,22 @@ The following 9 core engines and 5 repositories constitute the frozen backend ar
 - **Synchronization**: `WorkerSyncEngine`
 - **Repositories**: `WorkerRepository`, `AttendanceRepository`, `LocationRepository`, `ShiftRepository`, `TrustedDeviceRepository`
 
+### 1.A. Trusted Device Stability Rule
+The now-verified Trusted Device subsystem is a frozen baseline.
+Future work must not modify:
+- trusted-device authority logic;
+- trusted-device decision logic;
+- registration semantics;
+- reconciliation semantics;
+- administrator reset semantics;
+- worker trusted-device enforcement;
+
+unless:
+- a verified defect requires the change, or
+- an explicitly approved feature requires the change.
+
+Do not modify the Trusted Device subsystem merely to accommodate future administrative functionality.
+
 ### 2. Contract Stability Statement
 All public interfaces, method signatures, domain types, result codes, error classes, and state status objects exposed by the frozen modules are officially immutable. The Phase 10 Application Shell & UI layer must integrate against these exact contracts without altering method signatures or underlying data structures.
 
@@ -521,6 +537,59 @@ This prevents future investigations from modifying trusted-device logic when the
 - **Authoritative device identity availability**: `TrustedDeviceEngine.device()` combined with `selectDeviceIdentityProvider().kind`. A device identity is authoritative for trusted-device purposes **only** when the active provider is native (Capacitor/Android `ANDROID_ID`). The browser provider is explicitly development/test only.
 
 Resolved states: `UNAUTHENTICATED` / `AUTHENTICATED_DEVICE_AVAILABLE` / `AUTHENTICATED_DEVICE_UNAVAILABLE` / `RESOLUTION_FAILED`. When running in a browser, the device identity is reported as **unavailable**, so the Device Verification UI keeps trusted-device registration unavailable — the browser never silently registers itself as a trusted Android device. Trusted-device enforcement (registration, verification, administrator reset) remains owned by `TrustedDeviceRegistrationEngine` / `TrustedDeviceRepository`; resolution and enforcement are deliberately separated.
+
+### Trusted Device Investigation Learnings
+
+#### Problem
+Trusted-device registration appeared to complete locally, but remote synchronization failed and subsequent verification remained `NOT_REGISTERED`.
+
+#### Verified Investigation Evidence
+The investigation established that:
+- authentication completed successfully;
+- connectivity was online;
+- the Supabase authority path was selected;
+- the remote trusted-device lookup executed successfully;
+- no approved remote device was initially found;
+- local trusted-device state could exist independently of remote state;
+- reconciliation subsequently revoked the local record because remote authority remained `NOT_FOUND`.
+
+The defect was ultimately isolated at the repository persistence-mapping boundary.
+
+#### Root Cause
+The defect was in:
+`modules/repositories/trusted-device/trusted-device.repository.ts`
+
+inside `mapRowToRecord()`.
+
+The SQLite result set exposes the database column as:
+`device_id`
+
+but the mapping read:
+`row.deviceId`
+
+This caused the domain record to contain an undefined device identifier.
+
+When the record was subsequently uploaded to Supabase, the resulting payload contained a null `device_id`, producing the Supabase `NOT NULL` constraint failure.
+
+#### Repair
+The verified repair was:
+`deviceId: row.deviceId`
+
+changed to:
+`deviceId: row.device_id`
+
+No architectural redesign was required.
+
+#### Verified Validation
+Document that after the repair:
+- local trusted-device read-back preserved the device identifier;
+- registration persisted the device as `APPROVED`;
+- trusted-device status resolved correctly;
+- re-registration behaved correctly;
+- administrator reset preserved historical state as `REVOKED`;
+- the original `device_id` null constraint failure disappeared;
+- remote synchronization progressed beyond the previous device-identity failure;
+- the trusted-device flow was subsequently fully verified.
 
 ### Platform Runtime Contract
 

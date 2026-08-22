@@ -60,6 +60,26 @@ Only the Storage Engine communicates with SQLite.
 
 Features and Engines must never execute SQL directly.
 
+# Repository Mapping Learning
+
+SQLite persistence uses snake_case database columns while application/domain objects may use camelCase properties. Therefore repository mapping functions must explicitly translate between the two representations.
+
+Example:
+`device_id` → `deviceId`
+
+> A successful database write does not prove that the corresponding domain object is correctly populated on read-back.
+
+For persisted entities that subsequently participate in synchronization, validation should verify:
+1. database write;
+2. database read;
+3. row-to-domain mapping;
+4. domain identity;
+5. synchronization payload;
+6. remote persistence;
+7. remote read-back where applicable.
+
+This requirement is particularly important for identifiers.
+
 ---
 
 # UUID Strategy
