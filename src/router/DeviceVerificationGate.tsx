@@ -14,6 +14,7 @@ type VerificationPhase =
   | 'not_registered'
   | 'trusted'
   | 'different_device'
+  | 'device_already_active_elsewhere'
   | 'error';
 
 /**
@@ -122,6 +123,9 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
     } else if (result.code === TrustedDeviceRegistrationResultCode.DEVICE_MISMATCH) {
       console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: DEVICE_MISMATCH');
       setPhase('different_device');
+    } else if (result.code === TrustedDeviceRegistrationResultCode.DEVICE_ALREADY_ACTIVE_ELSEWHERE) {
+      console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: DEVICE_ALREADY_ACTIVE_ELSEWHERE');
+      setPhase('device_already_active_elsewhere');
     } else {
       console.log('[NativeIdentityDiag] DeviceVerificationGate.handleRegister: ERROR phase');
       setPhase('error');
@@ -193,6 +197,30 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
     );
   }
 
+  if (phase === 'device_already_active_elsewhere') {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-end">{diagnosticsButton}</div>
+        {showDiagnostics && <NativeDeviceDiagnostics />}
+        <div className="flex justify-end">
+          <button
+            onClick={onSignOut}
+            className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 rounded font-mono text-sm transition-colors border border-neutral-700"
+          >
+            Sign Out
+          </button>
+        </div>
+        <div className="text-center space-y-2">
+          <div className="text-neutral-100 font-mono text-sm">
+            This device is already registered to another worker.
+          </div>
+          <div className="text-neutral-400 font-mono text-sm">
+            Please contact an administrator to have the existing device registration revoked before registering this device.
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (phase === 'error') {
     return (
       <div className="space-y-4">

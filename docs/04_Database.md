@@ -13,7 +13,7 @@ Both databases should maintain equivalent schemas wherever practical to simplify
 
 ---
 
-# Database Philosophy
+## Database Philosophy
 
 The application is **Offline First**.
 
@@ -21,21 +21,21 @@ Every business record follows the same lifecycle.
 
 ```
 Create
-
+  
 ↓
-
+  
 Store Locally
-
+  
 ↓
-
+  
 Mark Pending
-
+  
 ↓
-
+  
 Synchronize
-
+  
 ↓
-
+  
 Mark Synced
 ```
 
@@ -43,7 +43,7 @@ The application never writes directly to Supabase.
 
 ---
 
-# Repository Ownership
+## Repository Ownership
 
 Every persisted entity is accessed exclusively through its Repository.
 
@@ -59,6 +59,8 @@ Repositories own business-specific persistence.
 Only the Storage Engine communicates with SQLite.
 
 Features and Engines must never execute SQL directly.
+
+---
 
 # Repository Mapping Learning
 
@@ -80,9 +82,18 @@ For persisted entities that subsequently participate in synchronization, validat
 
 This requirement is particularly important for identifiers.
 
+**Trusted-Device Investigation Learning (Verified):**
+- SQLite uses snake_case column names.
+- Domain models use camelCase properties.
+- Repository row mapping must explicitly map database columns to domain properties.
+- Verified defect: `row.deviceId` was incorrect; SQLite returned `row.device_id`.
+- This caused `deviceId` to become `undefined`, which eventually produced a `NULL device_id` Supabase upload.
+- The defect was isolated to: `modules/repositories/trusted-device/trusted-device.repository.ts`
+- The repair was a one-line repository mapping correction.
+
 ---
 
-# UUID Strategy
+## UUID Strategy
 
 Every business entity uses UUID v4.
 
@@ -99,7 +110,7 @@ Auto-increment IDs must never be used for business entities.
 
 ---
 
-# Timestamp Standard
+## Timestamp Standard
 
 All timestamps use UTC ISO-8601.
 
@@ -120,7 +131,7 @@ where applicable.
 
 ---
 
-# Worker
+## Worker
 
 Represents an authenticated employee.
 
@@ -136,7 +147,7 @@ Worker records originate from Supabase and are read-only on the device.
 
 ---
 
-# Shift
+## Shift
 
 Represents a single work session.
 
@@ -162,7 +173,7 @@ COMPLETED
 
 ---
 
-# Location
+## Location
 
 Represents an accepted location sample.
 
@@ -196,10 +207,9 @@ Accepted GPS locations are persisted in the locations table.
 Operational tracking history (such as tracking lifecycle events and location rejections) is persisted separately in the events table. 
 These stores serve different purposes and intentionally coexist.
 
-
 ---
 
-# Event
+## Event
 
 Stores operational events explaining application behaviour.
 
@@ -235,7 +245,7 @@ FOREGROUND_SERVICE_RESTARTED
 
 ---
 
-# Relationships
+## Relationships
 
 ```
 Worker
@@ -255,7 +265,7 @@ Worker
 
 ---
 
-# Synchronization
+## Synchronization
 
 Synchronization is determined by each entity's `sync_status`.
 
@@ -275,7 +285,7 @@ No dedicated queue table is required.
 
 ---
 
-# SQLite Tables
+## SQLite Tables
 
 ```
 workers
@@ -289,7 +299,7 @@ events
 
 ---
 
-# Supabase Tables
+## Supabase Tables
 
 ```
 workers
@@ -305,7 +315,7 @@ Equivalent naming simplifies synchronization, debugging, and migrations.
 
 ---
 
-# Local Only Data
+## Local Only Data
 
 The following data remains exclusively on the device:
 
@@ -318,17 +328,14 @@ This data is never synchronized.
 
 ---
 
-# Indexes
+## Indexes
 
 SQLite should maintain indexes on:
 
 ```
 worker_id
-
 shift_id
-
 recorded_at
-
 sync_status
 ```
 
@@ -336,30 +343,63 @@ Only introduce additional indexes when justified by measured performance.
 
 ---
 
-# Upload Rules
+## Upload Rules
 
 Only records with
-
 ```
 PENDING
 ```
-
 may be uploaded.
 
 ```
 FAILED
 ```
-
 records require retry.
 
 ```
 SYNCED
 ```
-
 records must never be uploaded again.
 
 ---
 
+# Trusted Devices
+
+Represents a worker's trusted device used for authentication and verification.
+
+| Field | Type |
+|-------|------|
+| id | UUID |
+| worker_id | UUID |
+| device_id | TEXT |
+| manufacturer | TEXT |
+| model | TEXT |
+| platform | TEXT |
+| app_version | TEXT |
+| registered_at | Timestamp |
+| approved_at | Timestamp (nullable) |
+| approved_by | TEXT (nullable) |
+| status | TEXT |
+| sync_status | TEXT |
+| created_at | Timestamp |
+| updated_at | Timestamp |
+
+Status values:
+```
+PENDING_APPROVAL
+APPROVED
+REJECTED
+REVOKED
+```
+
+Indexes:
+- `idx_trusted_devices_worker_id` (on worker_id)
+- `idx_trusted_devices_device_id` (on device_id)
+- `idx_trusted_devices_status` (on status)
+- `idx_trusted_devices_one_active_per_worker` (unique index on worker_id WHERE status = 'APPROVED')
+
+> The unique index `idx_trusted_devices_one_active_per_worker` guarantees only one APPROVED device per worker. It does NOT guarantee that one device belongs to only one worker.
+---
 # Conflict Resolution
 
 The mobile application is the system of record for field data.

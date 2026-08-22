@@ -589,6 +589,22 @@ export const TrustedDeviceRegistrationEngine = {
         });
       }
 
+      // APPLICATION REGISTRATION PROTECTION: Check if device already has APPROVED trusted-device record
+      // This provides deterministic, understandable result before attempting database operation
+      const deviceRecords = await TrustedDeviceRepository.findByDevice(device!.deviceId);
+      const hasApprovedRecordForOtherWorker = deviceRecords.some(
+        record => record.status === 'APPROVED' && record.workerId !== worker!.id
+      );
+      if (hasApprovedRecordForOtherWorker) {
+        console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: DEVICE_ALREADY_ACTIVE_ELSEWHERE');
+        rollbackRegistration();
+        return deepCloneAndFreeze({
+          success: false,
+          code: TrustedDeviceRegistrationResultCode.DEVICE_ALREADY_ACTIVE_ELSEWHERE,
+          error: 'Device is already active with another worker.'
+        });
+      }
+
       // Repository Ownership: Lookup existing registration for worker and device
       const thisDeviceRegistration = await TrustedDeviceRepository.findByWorkerAndDevice(worker!.id, device!.deviceId);
       console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: thisDeviceRegistration', thisDeviceRegistration);

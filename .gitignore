@@ -67,3 +67,4 @@ capacitor-cordova-android-plugins/
 
 supabase/.temp/
 .kilo/kilo.jsonc
+database/dev.db
