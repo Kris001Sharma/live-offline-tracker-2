@@ -5,6 +5,7 @@ import {
   TrustedDeviceRegistrationResultCode
 } from '../../modules/trusted-device-registration';
 import { IdentityResolver, IdentityResolutionState } from '../../modules/identity-resolution';
+import { DiagnosticTraceStore } from '../../modules/diagnostic/diagnostic-trace.store';
 import NativeDeviceDiagnostics from '../shell/NativeDeviceDiagnostics';
 
 type VerificationPhase =
@@ -50,6 +51,7 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
   );
 
   const applyVerification = (verification: DeviceVerificationState): void => {
+    DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: { step: 'gateDecision', receivedStatus: verification, renderedState: verification } });
     switch (verification) {
       case DeviceVerificationState.TRUSTED:
         setPhase('trusted');
@@ -74,6 +76,7 @@ const DeviceVerificationGate: React.FC<{ children: React.ReactNode; onSignOut?: 
       case IdentityResolutionState.AUTHENTICATED_DEVICE_AVAILABLE: {
         const result = await TrustedDeviceRegistrationEngine.status();
         console.log('[NativeIdentityDiag] DeviceVerificationGate.checkStatus: registration status', result);
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: { step: 'deviceVerificationGateReceived', statusReceived: result.verification } });
         applyVerification(result.verification);
         break;
       }

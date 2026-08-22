@@ -371,6 +371,8 @@ READY
 
 `AuthSession` is the application-facing session orchestrator that coordinates `AuthenticationEngine` and `UserContextEngine` (established by Slice 10A.5-R). `TrustedDeviceEngine` owns runtime device identity, which is application-level and independent of authentication (the engine contract: "a device exists even before login"); it is therefore initialized and loaded during bootstrap, not after login. `TrustedDeviceEngine.load()` never rejects (it returns a structured `DEVICE_ERROR` result on failure and degrades to `CLEARED`), so a device-load failure cannot block `READY`.
 
+> **Connectivity Lifecycle Note**: `ConnectivityEngine.initialize()` resets the engine to its initial `STOPPED`/offline state. `ConnectivityEngine.startMonitoring()` transitions the engine to `MONITORING` and seeds `isOnline` from the native network, but it is **not currently invoked during bootstrap**. Until `startMonitoring()` is integrated into the lifecycle, `ConnectivityEngine.isOnline()` will report `false` and trusted-device verification will select `LOCAL_FALLBACK` even when the native Android network is connected.
+
 The bootstrap entry point is single-flight:
 
 - **Concurrent bootstrap**: A caller that arrives while a bootstrap is running joins the in-flight bootstrap instead of starting a second sequence.
@@ -378,6 +380,138 @@ The bootstrap entry point is single-flight:
 - **Sequential post-success invocation**: Once `READY` is reached, the bootstrap is never restarted.
 
 React StrictMode development double-invocation therefore executes at most one bootstrap sequence and reaches `READY` once. The shell serializes bootstrap and does not duplicate `StorageEngine`'s single-flight implementation.
+
+### Verified Root Cause — Connectivity Lifecycle and Trusted Device Authority (Slice 10A.6.Y)
+
+Status: VERIFIED
+Evidence source: Physical Android validation with automatic diagnostic trace.
+Date: 2026-08-21
+
+The trusted-device verification problem was initially investigated as a trusted-device/local-storage/reconciliation defect. Physical Android validation has now established that the failure occurs earlier in the execution chain.
+
+#### Verified Physical Evidence
+
+- `nativeConnected = true`
+- `nativeConnectionType = wifi`
+- `ConnectivityEngine.state = STOPPED`
+- `ConnectivityEngine.isOnline() = false`
+- `comparisonResult = ENGINE_OFFLINE_NATIVE_ONLINE`
+- `trustedDeviceAuthorityPathSelected = LOCAL_FALLBACK`
+
+#### Resulting Execution Path
+
+```
+Authentication
+→ ConnectivityEngine reports offline
+→ Trusted Device verification selects local fallback
+→ local SQLite state determines the decision
+```
+
+This means the application does not reach the required Supabase-authority path while this condition exists.
+
+#### Verified Root Cause
+
+`ConnectivityEngine.initialize()` establishes/resets the engine into its initial stopped/offline state. `ConnectivityEngine.startMonitoring()` exists but is not currently invoked by the application lifecycle. Consequently, the engine does not transition into its monitoring/online state even when the native Android network is available. `ConnectivityEngine.isOnline()` therefore remains `false`. This causes trusted-device verification to select `LOCAL_FALLBACK`.
+
+#### Architectural Consequence
+
+The trusted-device registration/reconciliation layer is downstream of this failure. While the connectivity lifecycle is incorrectly reporting offline:
+
+- Supabase trusted-device authority is not reached.
+- Local SQLite state can influence the trusted-device decision.
+- Stale local trusted-device records can therefore appear to be the primary cause.
+- Reconciliation changes cannot reliably solve the root problem because the authoritative server state was never consulted.
+
+Therefore:
+
+> Connectivity readiness must be established before online trusted-device authority evaluation.
+
+#### Required Authority Model
+
+When network connectivity is genuinely available:
+
+```
+Authentication
+↓
+Connectivity readiness
+↓
+Supabase authority lookup
+↓
+Trusted-device decision
+```
+
+Supabase is authoritative. Local trusted-device state must not override Supabase while the application is online. The trusted-device decision must produce exactly one of:
+
+**TRUSTED** — Supabase has an approved trusted device matching the current device. → Allow application access.
+
+**NOT_REGISTERED** — Supabase has no approved trusted device for the worker. → Present the Register this device action.
+
+**DIFFERENT_DEVICE** — Supabase has an approved trusted device belonging to another device. → Block application access.
+
+Only genuine offline operation may use the local fallback path.
+
+#### Verified Product Flow
+
+The intended product behavior remains:
+
+```
+Authenticate
+↓
+Ask server
+↓
+Is this device trusted?
+├── YES → ENTER
+├── NO → REGISTER
+└── OTHER DEVICE → BLOCK
+```
+
+This flow must not be implemented by allowing local SQLite state to substitute for Supabase when the device is actually online.
+
+#### Implementation Ownership
+
+The verified defect belongs to the Connectivity lifecycle/engine integration layer. It does NOT belong primarily to:
+
+- `TrustedDeviceRegistrationEngine`
+- `TrustedDeviceSyncEngine`
+- `TrustedDeviceRepository`
+- `DeviceVerificationGate`
+- local trusted-device reconciliation
+
+Those components should not be modified to compensate for an incorrectly initialized connectivity engine.
+
+#### Required Future Implementation Constraint
+
+Before trusted-device authority behavior is validated, the connectivity lifecycle must demonstrate:
+
+- `ConnectivityEngine` initialized
+- Connectivity monitoring started
+- Actual native network state observed
+- `ConnectivityEngine` reflects the native network state
+- `ConnectivityEngine.isOnline()` returns `true` when the device is online
+- Trusted-device verification selects `SUPABASE_AUTHORITY`
+
+The following trace combination is evidence of an unresolved lifecycle defect:
+
+`ENGINE_OFFLINE_NATIVE_ONLINE` combined with `LOCAL_FALLBACK`.
+
+#### Investigation Boundary
+
+The investigation is now split into two layers:
+
+**Layer 1 — Connectivity Authority**
+Determine whether the application can reliably establish and expose its actual online/offline state.
+
+**Layer 2 — Trusted Device Authority**
+Only after Layer 1 is correct should trusted-device behavior be evaluated:
+
+```
+Supabase lookup
+→ authoritative decision
+→ local reconciliation
+→ registration/block/allow behavior
+```
+
+This prevents future investigations from modifying trusted-device logic when the application has not actually reached the server-authority layer.
 
 ### Identity Resolution Boundary (ADR-014)
 

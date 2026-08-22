@@ -3,6 +3,7 @@ import { TrustedDeviceEngine } from '../trusted-device';
 import { TrustedDeviceRepository, TrustedDeviceRecord } from '../repositories';
 import { TrustedDeviceSyncEngine } from '../trusted-device-sync/trusted-device-sync.service';
 import { ConnectivityEngine } from '../connectivity';
+import { Network } from '@capacitor/network';
 import {
   TrustedDeviceRegistrationStatus,
   DeviceVerificationState,
@@ -10,6 +11,7 @@ import {
   TrustedDeviceRegistrationResult,
   TrustedDeviceRegistrationResultCode
 } from './trusted-device-registration.types';
+import { DiagnosticTraceStore } from '../diagnostic/diagnostic-trace.store';
 
 /**
  * Deep clones and deep freezes an object recursively to ensure immutability.
@@ -103,8 +105,60 @@ export const TrustedDeviceRegistrationEngine = {
       }
 
       // Check if we're online to determine whether to use Supabase authority
+      const connectivityStatus = ConnectivityEngine.status();
+      let nativeStatus: any = null;
+      try {
+        nativeStatus = await Network.getStatus();
+      } catch (e) {
+        nativeStatus = { error: e instanceof Error ? e.message : String(e) };
+      }
+
+      DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'SUCCESS', data: {
+        step: 'connectivityCheckStarted',
+        timestamp: new Date().toISOString(),
+        engineInitialized: true,
+        engineState: connectivityStatus.state,
+        engineIsOnline: connectivityStatus.isOnline,
+        nativeConnected: nativeStatus?.connected ?? null,
+        nativeConnectionType: nativeStatus?.connectionType ?? null,
+        lastConnectivityEventAt: connectivityStatus.lastConnectivityChangeAt ?? null
+      }});
+
       const isOnline = ConnectivityEngine.isOnline();
-      console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: connectivity check', { isOnline });
+
+      const comparisonResult = (() => {
+        if (isOnline && nativeStatus?.connected) return 'ENGINE_ONLINE_NATIVE_ONLINE';
+        if (!isOnline && nativeStatus?.connected) return 'ENGINE_OFFLINE_NATIVE_ONLINE';
+        if (isOnline && !nativeStatus?.connected) return 'ENGINE_ONLINE_NATIVE_OFFLINE';
+        return 'ENGINE_OFFLINE_NATIVE_OFFLINE';
+      })();
+
+      DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'SUCCESS', data: {
+        step: 'connectivityCheckCompleted',
+        timestamp: new Date().toISOString(),
+        engineInitialized: true,
+        engineState: connectivityStatus.state,
+        engineIsOnline: isOnline,
+        nativeConnected: nativeStatus?.connected ?? null,
+        nativeConnectionType: nativeStatus?.connectionType ?? null,
+        lastConnectivityEventAt: connectivityStatus.lastConnectivityChangeAt ?? null
+      }});
+
+      DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'SUCCESS', data: {
+        step: 'connectivityComparison',
+        timestamp: new Date().toISOString(),
+        engineIsOnline: isOnline,
+        nativeConnected: nativeStatus?.connected ?? null,
+        comparisonResult,
+        lifecycleOrdering: connectivityStatus.state === 'MONITORING' ? 'CONNECTIVITY_READY_BEFORE_AUTH' : 'CONNECTIVITY_READY_AFTER_AUTH'
+      }});
+
+      DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+        step: 'trustedDeviceAuthorityPathSelected',
+        path: isOnline ? 'SUPABASE_AUTHORITY' : 'LOCAL_FALLBACK',
+        engineIsOnline: isOnline,
+        nativeConnected: nativeStatus?.connected ?? null
+      }});
 
       // Fetch local trusted device records for comparison
       const thisDevice = await TrustedDeviceRepository.findByWorkerAndDevice(worker!.id, device!.deviceId);
@@ -117,8 +171,30 @@ export const TrustedDeviceRegistrationEngine = {
       // If online, use Supabase as the authoritative source
       if (isOnline) {
         console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: using Supabase authority');
+
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: { step: 'supabaseClientResolution', available: TrustedDeviceSyncEngine.status().initialized } });
+
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'STARTED', data: { step: 'remoteTrustedDeviceLookupStarted', workerId: worker!.id, queryMethod: 'TrustedDeviceSyncEngine.findApprovedTrustedDeviceForWorker', table: 'trusted_devices' } });
         try {
           const supabaseApprovedDevice = await TrustedDeviceSyncEngine.findApprovedTrustedDeviceForWorker(worker!.id);
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+            step: 'remoteTrustedDeviceLookupCompleted',
+            workerId: worker!.id,
+            queryMethod: 'TrustedDeviceSyncEngine.findApprovedTrustedDeviceForWorker',
+            table: 'trusted_devices',
+            querySucceeded: true,
+            rowCount: supabaseApprovedDevice ? 1 : 0,
+            remoteRecordFound: !!supabaseApprovedDevice,
+            ...(supabaseApprovedDevice ? {
+              remoteRecordId: supabaseApprovedDevice.id,
+              remoteWorkerId: supabaseApprovedDevice.workerId,
+              remoteDeviceId: supabaseApprovedDevice.deviceId,
+              remoteStatus: supabaseApprovedDevice.status,
+              remoteSyncStatus: supabaseApprovedDevice.syncStatus
+            } : {
+              remoteOutcome: 'NOT_FOUND'
+            })
+          }});
           console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: Supabase lookup result', {
             supabaseDevice: supabaseApprovedDevice ? {
               deviceId: supabaseApprovedDevice.deviceId,
@@ -127,13 +203,65 @@ export const TrustedDeviceRegistrationEngine = {
             } : null
           });
 
+          // AUTHORITY INPUT SNAPSHOT - frozen diagnostic snapshot before decision
+          const allLocalRecords = await TrustedDeviceRepository.findByWorker(worker!.id);
+          const localApproved = allLocalRecords.find(r => r.status === 'APPROVED');
+          const authoritySnapshot = Object.freeze({
+            workerId: worker!.id,
+            currentDeviceId: device!.deviceId,
+            remoteRecordFound: !!supabaseApprovedDevice,
+            remoteWorkerId: supabaseApprovedDevice?.workerId ?? null,
+            remoteDeviceId: supabaseApprovedDevice?.deviceId ?? null,
+            remoteStatus: supabaseApprovedDevice?.status ?? null,
+            localRecordFound: allLocalRecords.length > 0,
+            localRecordId: localApproved?.id ?? null,
+            localDeviceId: localApproved?.deviceId ?? null,
+            localStatus: localApproved?.status ?? null,
+            online: isOnline
+          });
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: authoritySnapshot });
+
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'STARTED', data: { step: 'localTrustedDeviceLookupStarted', workerId: worker!.id } });
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+            step: 'localTrustedDeviceLookupCompleted',
+            workerId: worker!.id,
+            recordCount: allLocalRecords.length,
+            records: allLocalRecords.map(r => ({
+              recordId: r.id,
+              workerId: r.workerId,
+              deviceId: r.deviceId,
+              status: r.status,
+              syncStatus: r.syncStatus,
+              isCurrentDevice: r.deviceId === device!.deviceId
+            }))
+          }});
+
           // Reconcile local state with Supabase authoritative state
-          await reconcileLocalStateWithSupabase(worker!.id, device!.deviceId, supabaseApprovedDevice);
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'STARTED', data: { step: 'localReconciliationStarted' } });
+          await this.reconcileLocalStateWithSupabase(worker!.id, device!.deviceId, supabaseApprovedDevice);
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+            step: 'localReconciliationCompleted',
+            authoritativeDecision: supabaseApprovedDevice
+              ? (supabaseApprovedDevice.deviceId === device!.deviceId ? 'TRUSTED' : 'DIFFERENT_DEVICE')
+              : 'NOT_REGISTERED'
+          }});
 
           // Make decision based on Supabase authoritative state
           if (!supabaseApprovedDevice) {
             // STATE A: SERVER HAS NO TRUSTED DEVICE
-            console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: SERVER STATE - NO TRUSTED DEVICE');
+            DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+              step: 'authoritativeDecisionCalculated',
+              decision: 'NOT_REGISTERED',
+              decisionReason: 'REMOTE_NO_APPROVED_DEVICE',
+              decisionInputSource: 'SUPABASE'
+            }});
+            DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+              step: 'finalTrustedDeviceDecision',
+              authoritativeDecision: 'NOT_REGISTERED',
+              returnedStatus: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+              returnedVerification: DeviceVerificationState.NOT_REGISTERED,
+              decisionConsistent: true
+            }});
             return deepCloneAndFreeze({
               status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
               verification: DeviceVerificationState.NOT_REGISTERED
@@ -142,7 +270,19 @@ export const TrustedDeviceRegistrationEngine = {
 
           if (supabaseApprovedDevice.deviceId === device!.deviceId) {
             // STATE B: SERVER HAS TRUSTED DEVICE FOR CURRENT DEVICE
-            console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: SERVER STATE - TRUSTED (SAME DEVICE)');
+            DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+              step: 'authoritativeDecisionCalculated',
+              decision: 'TRUSTED',
+              decisionReason: 'REMOTE_APPROVED_SAME_DEVICE',
+              decisionInputSource: 'SUPABASE'
+            }});
+            DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+              step: 'finalTrustedDeviceDecision',
+              authoritativeDecision: 'TRUSTED',
+              returnedStatus: TrustedDeviceRegistrationStatus.APPROVED,
+              returnedVerification: DeviceVerificationState.TRUSTED,
+              decisionConsistent: true
+            }});
             return deepCloneAndFreeze({
               status: TrustedDeviceRegistrationStatus.APPROVED,
               verification: DeviceVerificationState.TRUSTED
@@ -150,16 +290,54 @@ export const TrustedDeviceRegistrationEngine = {
           }
 
           // STATE C: SERVER HAS TRUSTED DEVICE FOR ANOTHER DEVICE
-          console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: SERVER STATE - DIFFERENT DEVICE');
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+            step: 'authoritativeDecisionCalculated',
+            decision: 'DIFFERENT_DEVICE',
+            decisionReason: 'REMOTE_APPROVED_DIFFERENT_DEVICE',
+            decisionInputSource: 'SUPABASE'
+          }});
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+            step: 'finalTrustedDeviceDecision',
+            authoritativeDecision: 'DIFFERENT_DEVICE',
+            returnedStatus: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+            returnedVerification: DeviceVerificationState.DIFFERENT_DEVICE,
+            decisionConsistent: true
+          }});
           return deepCloneAndFreeze({
             status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
             verification: DeviceVerificationState.DIFFERENT_DEVICE
           });
         } catch (supabaseError) {
-          console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: SUPABASE ERROR', supabaseError);
-          // If Supabase query fails, fall back to local state (but log the error)
-          // In a production implementation, we might want to handle this differently
-          // For now, we'll continue with local state logic below
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'FAILED', data: {
+            step: 'remoteTrustedDeviceLookupCompleted',
+            workerId: worker!.id,
+            queryMethod: 'TrustedDeviceSyncEngine.findApprovedTrustedDeviceForWorker',
+            table: 'trusted_devices',
+            querySucceeded: false,
+            rowCount: 0,
+            remoteRecordFound: false,
+            remoteOutcome: 'ERROR',
+            error: supabaseError instanceof Error ? supabaseError.message : String(supabaseError)
+          }});
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'FAILED', data: {
+            step: 'authoritativeDecisionCalculated',
+            decision: 'ERROR',
+            decisionReason: 'SUPABASE_QUERY_FAILED',
+            decisionInputSource: 'SUPABASE'
+          }});
+          DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'FAILED', data: {
+            step: 'finalTrustedDeviceDecision',
+            authoritativeDecision: 'ERROR',
+            returnedStatus: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+            returnedVerification: DeviceVerificationState.ERROR,
+            decisionConsistent: true
+          }});
+          // If Supabase query fails while online, return ERROR as per spec
+          // Local storage must not be allowed to resurrect an obsolete trusted-device decision
+          return deepCloneAndFreeze({
+            status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+            verification: DeviceVerificationState.ERROR
+          });
         }
       } else {
         console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: OFFLINE - using local state');
@@ -172,6 +350,20 @@ export const TrustedDeviceRegistrationEngine = {
           ? (thisDevice.status as unknown as TrustedDeviceRegistrationStatus)
           : TrustedDeviceRegistrationStatus.NOT_REGISTERED;
 
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+          step: 'authoritativeDecisionCalculated',
+          decision: DeviceVerificationState.NOT_REGISTERED,
+          decisionReason: 'OFFLINE_NO_APPROVED_DEVICE',
+          decisionInputSource: 'LOCAL'
+        }});
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+          step: 'finalTrustedDeviceDecision',
+          authoritativeDecision: 'OFFLINE_NOT_REGISTERED',
+          returnedStatus: recordStatus,
+          returnedVerification: DeviceVerificationState.NOT_REGISTERED,
+          decisionConsistent: true
+        }});
+
         return deepCloneAndFreeze({
           status: recordStatus,
           verification: DeviceVerificationState.NOT_REGISTERED
@@ -180,6 +372,20 @@ export const TrustedDeviceRegistrationEngine = {
 
       // An active trusted device exists.
       if (approvedDevice.deviceId === device!.deviceId) {
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+          step: 'authoritativeDecisionCalculated',
+          decision: DeviceVerificationState.TRUSTED,
+          decisionReason: 'OFFLINE_LOCAL_TRUSTED',
+          decisionInputSource: 'LOCAL'
+        }});
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+          step: 'finalTrustedDeviceDecision',
+          authoritativeDecision: 'OFFLINE_TRUSTED',
+          returnedStatus: TrustedDeviceRegistrationStatus.APPROVED,
+          returnedVerification: DeviceVerificationState.TRUSTED,
+          decisionConsistent: true
+        }});
+
         return deepCloneAndFreeze({
           status: TrustedDeviceRegistrationStatus.APPROVED,
           verification: DeviceVerificationState.TRUSTED
@@ -187,11 +393,33 @@ export const TrustedDeviceRegistrationEngine = {
       }
 
       // A different active trusted device exists; this device is blocked.
+      DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+        step: 'authoritativeDecisionCalculated',
+        decision: DeviceVerificationState.DIFFERENT_DEVICE,
+        decisionReason: 'OFFLINE_LOCAL_DIFFERENT_DEVICE',
+        decisionInputSource: 'LOCAL'
+      }});
+      DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+        step: 'finalTrustedDeviceDecision',
+        authoritativeDecision: 'OFFLINE_DIFFERENT_DEVICE',
+        returnedStatus: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+        returnedVerification: DeviceVerificationState.DIFFERENT_DEVICE,
+        decisionConsistent: true
+      }});
+
       return deepCloneAndFreeze({
         status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
         verification: DeviceVerificationState.DIFFERENT_DEVICE
       });
     } catch (e) {
+      DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'FAILED', data: {
+        step: 'finalTrustedDeviceDecision',
+        authoritativeDecision: 'ERROR',
+        returnedStatus: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
+        returnedVerification: DeviceVerificationState.ERROR,
+        decisionConsistent: true,
+        error: e instanceof Error ? e.message : String(e)
+      }});
       console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.status: ERROR', e);
       return deepCloneAndFreeze({
         status: TrustedDeviceRegistrationStatus.NOT_REGISTERED,
@@ -230,16 +458,35 @@ export const TrustedDeviceRegistrationEngine = {
         } : null
       });
 
+      const recordsBefore = await TrustedDeviceRepository.findByWorker(workerId);
+      const recordsChanged: Array<{ recordId: string; deviceId: string; oldStatus: string; newStatus: string; oldSyncStatus: string; newSyncStatus: string }> = [];
+
       // Case 1: Supabase says NO TRUSTED DEVICE (NONE)
       if (!supabaseApprovedDevice) {
         // If there's a local approved device, we need to reconcile it
         if (localApprovedDevice) {
           console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.reconcileLocalStateWithSupabase: RECONCILING - removing local approved device as Supabase says NONE');
+          recordsChanged.push({
+            recordId: localApprovedDevice.id,
+            deviceId: localApprovedDevice.deviceId,
+            oldStatus: localApprovedDevice.status,
+            newStatus: 'REVOKED',
+            oldSyncStatus: localApprovedDevice.syncStatus,
+            newSyncStatus: 'PENDING'
+          });
           // Reset the local approved device to REVOKED state (obsolete state)
           await TrustedDeviceRepository.resetActive(workerId);
         }
         // If there's a local pending/rejected device for current device, we can leave it
         // as it might be a new registration waiting to sync
+        const recordsAfter = await TrustedDeviceRepository.findByWorker(workerId);
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+          step: 'localReconciliationCompleted',
+          authoritativeDecision: 'NOT_REGISTERED',
+          recordsBefore: recordsBefore.map(r => ({ recordId: r.id, deviceId: r.deviceId, status: r.status })),
+          recordsChanged,
+          recordsAfter: recordsAfter.map(r => ({ recordId: r.id, deviceId: r.deviceId, status: r.status }))
+        }});
         return;
       }
 
@@ -261,6 +508,14 @@ export const TrustedDeviceRegistrationEngine = {
             registeredAt: thisDevice?.registeredAt || new Date().toISOString()
           });
         }
+        const recordsAfter = await TrustedDeviceRepository.findByWorker(workerId);
+        DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+          step: 'localReconciliationCompleted',
+          authoritativeDecision: 'TRUSTED',
+          recordsBefore: recordsBefore.map(r => ({ recordId: r.id, deviceId: r.deviceId, status: r.status })),
+          recordsChanged,
+          recordsAfter: recordsAfter.map(r => ({ recordId: r.id, deviceId: r.deviceId, status: r.status }))
+        }});
         return;
       }
 
@@ -269,12 +524,36 @@ export const TrustedDeviceRegistrationEngine = {
       // (unless it's a stale record that needs reconciliation)
       if (localApprovedDevice && localApprovedDevice.deviceId === currentDeviceId) {
         console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.reconcileLocalStateWithSupabase: RECONCILING - removing local approved device for current device as Supabase says DIFFERENT_DEVICE');
+        recordsChanged.push({
+          recordId: localApprovedDevice.id,
+          deviceId: localApprovedDevice.deviceId,
+          oldStatus: localApprovedDevice.status,
+          newStatus: 'REVOKED',
+          oldSyncStatus: localApprovedDevice.syncStatus,
+          newSyncStatus: 'PENDING'
+        });
         // Reset the local approved device for current device to REVOKED state
         await TrustedDeviceRepository.resetActive(workerId);
       }
       // We don't touch other local records as they may be legitimate for other devices
+      const recordsAfter = await TrustedDeviceRepository.findByWorker(workerId);
+      DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'SUCCESS', data: {
+        step: 'localReconciliationCompleted',
+        authoritativeDecision: 'DIFFERENT_DEVICE',
+        recordsBefore: recordsBefore.map(r => ({ recordId: r.id, deviceId: r.deviceId, status: r.status })),
+        recordsChanged,
+        recordsAfter: recordsAfter.map(r => ({ recordId: r.id, deviceId: r.deviceId, status: r.status }))
+      }});
     } catch (error) {
       console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.reconcileLocalStateWithSupabase: ERROR', error);
+      DiagnosticTraceStore.append({ phase: 'TRUSTED_DEVICE_VERIFICATION', result: 'FAILED', data: {
+        step: 'localReconciliationCompleted',
+        authoritativeDecision: 'ERROR',
+        recordsBefore: [],
+        recordsChanged: [],
+        recordsAfter: [],
+        error: error instanceof Error ? error.message : String(error)
+      }});
       // Don't throw - we don't want reconciliation failures to break the registration status check
     }
   },
@@ -363,6 +642,46 @@ export const TrustedDeviceRegistrationEngine = {
         appVersion: device!.appVersion,
         registeredAt: new Date().toISOString()
       });
+
+      // Perform authoritative verification after registration
+      // Initialize sync engine if needed
+      TrustedDeviceSyncEngine.initialize();
+
+      // Upload the newly registered trusted device to Supabase
+      const pendingDevices = await TrustedDeviceRepository.findPendingByWorker(worker!.id);
+      if (pendingDevices.length > 0) {
+        try {
+          await TrustedDeviceSyncEngine.uploadTrustedDevices(pendingDevices);
+          // Note: We don't require marking sync to succeed for registration verification
+          // The directive says: "Do not falsely report the remote upload as failed if the remote upload succeeded."
+          // We'll attempt to mark sync but treat upload success as sufficient for registration
+          try {
+            for (const record of pendingDevices) {
+              await TrustedDeviceRepository.markSynced(record.id);
+            }
+          } catch (markSyncError) {
+            // Log mark sync failure but don't fail registration - upload succeeded
+            console.warn('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: MARK_SYNC_FAILED (non-fatal)', markSyncError);
+          }
+        } catch (uploadError) {
+          console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: UPLOAD_ERROR', uploadError);
+          transientRegistrationState = null;
+          return deepCloneAndFreeze({
+            success: false,
+            code: TrustedDeviceRegistrationResultCode.PERSISTENCE_ERROR,
+            error: 'Failed to upload trusted device to server'
+          });
+        }
+      } else {
+        // No pending devices to upload - this should not happen after successful local registration
+        console.error('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: NO_PENDING_DEVICES');
+        transientRegistrationState = null;
+        return deepCloneAndFreeze({
+          success: false,
+          code: TrustedDeviceRegistrationResultCode.PERSISTENCE_ERROR,
+          error: 'No pending devices found for upload after registration'
+        });
+      }
 
       transientRegistrationState = null;
       console.log('[NativeIdentityDiag] TrustedDeviceRegistrationEngine.registerCurrentDevice: SUCCESS');

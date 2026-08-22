@@ -5,8 +5,9 @@ import { TrustedDeviceSyncProvider } from './trusted-device-sync.types';
 import { AuthenticationEngine } from '../authentication';
 import { WorkerRepository } from '../repositories/worker';
 import { TrustedDeviceRepository } from '../repositories/trusted-device';
-import { trustedDeviceSliceTracer } from '../diagnostic/sliceTracer';
 import { ConnectivityEngine } from '../connectivity';
+import { TrustedDeviceStatus } from '../repositories/trusted-device/trusted-device.repository.types';
+import { SyncStatus } from '../repositories/trusted-device/trusted-device.repository.types';
 
 let initialized = false;
 let supabaseClient: SupabaseClient | null = null;
@@ -137,71 +138,36 @@ export const TrustedDeviceSyncEngine = {
    * Implements the 5-step verification flow as specified in the directive.
    */
   async syncTrustedDevice(): Promise<{ success: boolean; error?: any }> {
-    // Reset tracer for this sync attempt
-    trustedDeviceSliceTracer.reset();
-
-    // Step 1: syncStarted
-    trustedDeviceSliceTracer.startStep(1);
-    trustedDeviceSliceTracer.completeStep(1, {});
-
     try {
-      // Step 2: Resolve authenticated identity
-      trustedDeviceSliceTracer.startStep(2);
+      // Step 1: Resolve authenticated identity
       const authUser = AuthenticationEngine.currentUser();
       if (!authUser) {
         const error = new Error('AUTHENTICATED_USER_NOT_AVAILABLE');
-        trustedDeviceSliceTracer.failStep(2, error);
         return { success: false, error };
       }
-      trustedDeviceSliceTracer.completeStep(2, { authUserId: authUser.id });
 
-      // Step 3: Resolve local worker
-      trustedDeviceSliceTracer.startStep(3);
+      // Step 2: Resolve local worker
       const worker = await WorkerRepository.findById(authUser.id);
       if (!worker) {
         const error = new Error('LOCAL_WORKER_NOT_FOUND');
-        trustedDeviceSliceTracer.failStep(3, error);
         return { success: false, error };
       }
       if (worker.workerId !== authUser.id) {
         const error = new Error('WORKER_IDENTITY_MISMATCH');
-        trustedDeviceSliceTracer.failStep(3, error);
         return { success: false, error };
       }
-      trustedDeviceSliceTracer.completeStep(3, {
-        workerId: worker.workerId,
-        identityMatch: true
-      });
 
-      // Step 4: Resolve local pending trusted device
-      trustedDeviceSliceTracer.startStep(4);
+      // Step 3: Resolve local pending trusted device
       const pendingDevices = await TrustedDeviceRepository.findPendingByWorker(authUser.id);
       if (pendingDevices.length === 0) {
         // No pending device is not an error - it's a clean NO_PENDING_DEVICE result
-        trustedDeviceSliceTracer.completeStep(4, {});
-        trustedDeviceSliceTracer.startStep(5);
-        trustedDeviceSliceTracer.failStep(5, new Error('NO_PENDING_DEVICE'));
-        trustedDeviceSliceTracer.startStep(6);
-        trustedDeviceSliceTracer.failStep(6, new Error('NO_PENDING_DEVICE'));
-        trustedDeviceSliceTracer.startStep(7);
-        trustedDeviceSliceTracer.failStep(7, new Error('NO_PENDING_DEVICE'));
-        trustedDeviceSliceTracer.startStep(8);
-        trustedDeviceSliceTracer.failStep(8, new Error('NO_PENDING_DEVICE'));
         return { success: true }; // Success but nothing to sync
       }
 
       // Take the first pending device (should be only one per worker due to constraints)
       const trustedDevice = pendingDevices[0];
-      trustedDeviceSliceTracer.completeStep(4, {
-        trustedDeviceId: trustedDevice.id,
-        workerId: trustedDevice.workerId,
-        deviceId: trustedDevice.deviceId,
-        status: trustedDevice.status,
-        syncStatus: trustedDevice.syncStatus
-      });
 
-      // Step 5: Verify remote worker
-      trustedDeviceSliceTracer.startStep(5);
+      // Step 4: Verify remote worker
       const { data: remoteWorker, error: remoteWorkerError } = await supabaseClient
         .from('workers')
         .select('worker_id')
@@ -209,20 +175,15 @@ export const TrustedDeviceSyncEngine = {
         .single();
 
       if (remoteWorkerError) {
-        trustedDeviceSliceTracer.failStep(5, remoteWorkerError);
         return { success: false, error: remoteWorkerError };
       }
 
       if (!remoteWorker) {
         const error = new Error('REMOTE_WORKER_NOT_FOUND');
-        trustedDeviceSliceTracer.failStep(5, error);
         return { success: false, error };
       }
 
-      trustedDeviceSliceTracer.completeStep(5, { workerFound: true });
-
-      // Step 6: Upload trusted device
-      trustedDeviceSliceTracer.startStep(6);
+      // Step 5: Upload trusted device
       try {
         // Transform local record to Supabase format
         const payload = {
@@ -247,47 +208,25 @@ export const TrustedDeviceSyncEngine = {
           .upsert(payload, { onConflict: 'id' });
 
         if (uploadError) {
-          trustedDeviceSliceTracer.failStep(6, uploadError);
           return { success: false, error: uploadError };
         }
-
-        trustedDeviceSliceTracer.completeStep(6, {});
       } catch (uploadError) {
-        trustedDeviceSliceTracer.failStep(6, uploadError);
         return { success: false, error: uploadError };
       }
 
-      // Step 7: Mark local record synced
-      trustedDeviceSliceTracer.startStep(7);
+      // Step 6: Mark local record synced
       try {
         await TrustedDeviceRepository.markSynced(trustedDevice.id);
-        trustedDeviceSliceTracer.completeStep(7, {});
       } catch (markSyncError) {
-        trustedDeviceSliceTracer.failStep(7, markSyncError);
         // Note: We don't return early here because the upload succeeded
         // The directive says: "Do not falsely report the remote upload as failed if the remote upload succeeded."
-        // We'll continue to mark syncCompleted as failed but note that upload succeeded
+        // We'll continue but note that marking sync failed
+        // However, for the return value, we'll still consider it success since upload succeeded
       }
 
-      // Step 8: syncCompleted
-      trustedDeviceSliceTracer.startStep(8);
-      const syncSuccess = trustedDeviceSliceTracer.getStepResult(7) === 'SUCCESS';
-      trustedDeviceSliceTracer.completeStep(8, {
-        uploadSuccessful: trustedDeviceSliceTracer.getStepResult(6) === 'SUCCESS'
-      });
-
-      return {
-        success: syncSuccess,
-        error: syncSuccess ? undefined : new Error('MARK_SYNCED_FAILED')
-      };
+      return { success: true };
     } catch (unexpectedError) {
       // Handle any unexpected errors that might occur during the flow
-      // Find which step we were on and mark it as failed
-      const currentStep = trustedDeviceSliceTracer.getCurrentStep();
-      if (currentStep) {
-        trustedDeviceSliceTracer.failStep(currentStep.id, unexpectedError);
-      }
-
       return { success: false, error: unexpectedError };
     }
   },

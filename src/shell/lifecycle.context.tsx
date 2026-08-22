@@ -7,6 +7,8 @@ import { UserContextEngine } from '../../modules/user-context';
 import { WorkerProfileEngine } from '../../modules/worker-profile';
 import { AuthSession } from '../../modules/auth-session';
 import { TrustedDeviceEngine } from '../../modules/trusted-device';
+import { DiagnosticTraceStore } from '../../modules/diagnostic/diagnostic-trace.store';
+import { Network } from '@capacitor/network';
 import { LifecycleContextValue, LifecycleStateModel } from './lifecycle.types';
 
 const LifecycleContext = createContext<LifecycleContextValue | undefined>(undefined);
@@ -38,14 +40,94 @@ export function ApplicationLifecycleProvider({ children }: { children: ReactNode
         const adapter = new CapacitorSQLiteAdapter();
         await StorageEngine.initialize(adapter);
 
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'STARTED', data: { step: 'connectivityLifecycleStart' } });
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'STARTED', data: { step: 'connectivityInitializeStarted' } });
         ConnectivityEngine.initialize();
+        const connectivityStatusAfterInit = ConnectivityEngine.status();
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'SUCCESS', data: {
+          step: 'connectivityInitializeCompleted',
+          timestamp: new Date().toISOString(),
+          engineInitialized: true,
+          engineState: connectivityStatusAfterInit.state,
+          engineIsOnline: connectivityStatusAfterInit.isOnline,
+          nativeConnected: null,
+          nativeConnectionType: null
+        }});
+
+        let nativeStatus: any = null;
+        try {
+          nativeStatus = await Network.getStatus();
+        } catch (e) {
+          nativeStatus = { error: e instanceof Error ? e.message : String(e) };
+        }
+
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'SUCCESS', data: {
+          step: 'connectivityInitialNativeStatus',
+          timestamp: new Date().toISOString(),
+          engineInitialized: true,
+          engineState: connectivityStatusAfterInit.state,
+          engineIsOnline: connectivityStatusAfterInit.isOnline,
+          nativeConnected: nativeStatus?.connected ?? null,
+          nativeConnectionType: nativeStatus?.connectionType ?? null
+        }});
+
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'STARTED', data: { step: 'connectivityMonitoringStarted' } });
+        const monitoringResult = await ConnectivityEngine.startMonitoring();
+        const connectivityStatusAfterMonitoring = ConnectivityEngine.status();
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: monitoringResult.success ? 'SUCCESS' : 'FAILED', data: {
+          step: 'connectivityMonitoringCompleted',
+          timestamp: new Date().toISOString(),
+          engineInitialized: true,
+          engineState: connectivityStatusAfterMonitoring.state,
+          engineIsOnline: connectivityStatusAfterMonitoring.isOnline,
+          nativeConnected: nativeStatus?.connected ?? null,
+          nativeConnectionType: nativeStatus?.connectionType ?? null,
+          monitoringStartedAt: connectivityStatusAfterMonitoring.lastStartedAt ?? null,
+          monitoringCompletedAt: new Date().toISOString(),
+          lastConnectivityEventAt: connectivityStatusAfterMonitoring.lastConnectivityChangeAt ?? null,
+          monitoringResultSuccess: monitoringResult.success,
+          monitoringError: monitoringResult.error ?? null
+        }});
+
+        DiagnosticTraceStore.append({ phase: 'CONNECTIVITY_LIFECYCLE', result: 'SUCCESS', data: {
+          step: 'connectivityEngineStateAfterMonitoring',
+          timestamp: new Date().toISOString(),
+          engineInitialized: true,
+          engineState: connectivityStatusAfterMonitoring.state,
+          engineIsOnline: connectivityStatusAfterMonitoring.isOnline,
+          nativeConnected: nativeStatus?.connected ?? null,
+          nativeConnectionType: nativeStatus?.connectionType ?? null,
+          monitoringStartedAt: connectivityStatusAfterMonitoring.lastStartedAt ?? null,
+          monitoringCompletedAt: new Date().toISOString(),
+          lastConnectivityEventAt: connectivityStatusAfterMonitoring.lastConnectivityChangeAt ?? null
+        }});
+
         AuthenticationEngine.initialize();
         UserContextEngine.initialize();
         WorkerProfileEngine.initialize();
         AuthSession.initialize();
         TrustedDeviceEngine.initialize();
+        DiagnosticTraceStore.clear();
+        DiagnosticTraceStore.append({
+          phase: 'TRUSTED_DEVICE_VERIFICATION',
+          result: 'STARTED',
+          data: { step: 'deviceResolutionStarted' }
+        });
         await TrustedDeviceEngine.load();
-
+        const deviceStatus = TrustedDeviceEngine.status();
+        const currentDevice = TrustedDeviceEngine.device();
+        DiagnosticTraceStore.append({
+          phase: 'TRUSTED_DEVICE_VERIFICATION',
+          result: 'SUCCESS',
+          data: {
+            step: 'deviceResolutionCompleted',
+            initialized: deviceStatus.initialized,
+            state: deviceStatus.state,
+            currentDeviceId: currentDevice?.deviceId ?? null,
+            platform: currentDevice?.platform ?? null,
+            deviceKind: currentDevice ? 'native_or_browser' : null
+          }
+        });
         readyRef.current = true;
         setState({ state: 'READY', error: null });
       } catch (error) {

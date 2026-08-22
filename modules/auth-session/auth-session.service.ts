@@ -4,6 +4,9 @@ import { WorkerRepository } from '../repositories';
 import { AuthSessionStatus, AuthSessionResult } from './auth-session.types';
 import { TrustedDeviceSyncEngine } from '../trusted-device-sync/trusted-device-sync.service';
 import { SyncEngine } from '../sync/sync.service';
+import { DiagnosticTraceStore } from '../diagnostic/diagnostic-trace.store';
+import { ConnectivityEngine } from '../connectivity';
+import { Network } from '@capacitor/network';
 
 let initialized = false;
 let lastLoginAt: string | undefined;
@@ -75,9 +78,20 @@ export const AuthSession = {
   },
 
   async login(email: string, password: string): Promise<AuthSessionResult> {
+    DiagnosticTraceStore.clear();
+    DiagnosticTraceStore.append({
+      phase: 'TRUSTED_DEVICE_VERIFICATION',
+      result: 'STARTED',
+      data: { step: 'authenticationStarted', source: 'login' }
+    });
     const authResult = await AuthenticationEngine.login(email, password);
 
     if (!authResult.success) {
+      DiagnosticTraceStore.append({
+        phase: 'TRUSTED_DEVICE_VERIFICATION',
+        result: 'FAILED',
+        data: { step: 'authenticationCompleted', success: false, source: 'login', error: authResult.error }
+      });
       return Object.freeze({
         success: false,
         error: authResult.error,
@@ -91,7 +105,65 @@ export const AuthSession = {
         throw new Error('Authentication succeeded but no user was returned');
       }
 
+      DiagnosticTraceStore.append({
+        phase: 'TRUSTED_DEVICE_VERIFICATION',
+        result: 'SUCCESS',
+        data: {
+          step: 'authenticationCompleted',
+          success: true,
+          authUserId: authUser.id,
+          authenticationState: AuthenticationEngine.status().state,
+          source: 'login'
+        }
+      });
+
+      const connectivityStatusAtAuth = ConnectivityEngine.status();
+      let nativeStatusAtAuth: any = null;
+      try {
+        nativeStatusAtAuth = await Network.getStatus();
+      } catch (e) {
+        nativeStatusAtAuth = { error: e instanceof Error ? e.message : String(e) };
+      }
+
+      DiagnosticTraceStore.append({
+        phase: 'CONNECTIVITY_LIFECYCLE',
+        result: 'SUCCESS',
+        data: {
+          step: 'connectivityStateAtAuthenticationCompletion',
+          timestamp: new Date().toISOString(),
+          engineInitialized: true,
+          engineState: connectivityStatusAtAuth.state,
+          engineIsOnline: connectivityStatusAtAuth.isOnline,
+          nativeConnected: nativeStatusAtAuth?.connected ?? null,
+          nativeConnectionType: nativeStatusAtAuth?.connectionType ?? null,
+          lastConnectivityEventAt: connectivityStatusAtAuth.lastConnectivityChangeAt ?? null
+        }
+      });
+
+      DiagnosticTraceStore.append({
+        phase: 'CONNECTIVITY_LIFECYCLE',
+        result: 'SUCCESS',
+        data: {
+          step: 'nativeNetworkStateAtAuthenticationCompletion',
+          timestamp: new Date().toISOString(),
+          nativeConnected: nativeStatusAtAuth?.connected ?? null,
+          nativeConnectionType: nativeStatusAtAuth?.connectionType ?? null
+        }
+      });
+
       const worker = mapToWorker(authUser);
+
+      DiagnosticTraceStore.append({
+        phase: 'TRUSTED_DEVICE_VERIFICATION',
+        result: 'SUCCESS',
+        data: {
+          step: 'workerResolutionCompleted',
+          authUserId: authUser.id,
+          workerId: worker.id,
+          workerEmail: worker.email,
+          workerResolutionSource: 'authUserMapping'
+        }
+      });
 
       // Atomic Session Construction
       if (!worker.id || !worker.email || !worker.role || !worker.displayName) {
@@ -154,9 +226,20 @@ export const AuthSession = {
   },
 
   async restore(): Promise<AuthSessionResult> {
+    DiagnosticTraceStore.clear();
+    DiagnosticTraceStore.append({
+      phase: 'TRUSTED_DEVICE_VERIFICATION',
+      result: 'STARTED',
+      data: { step: 'authenticationStarted', source: 'restore' }
+    });
     const authResult = await AuthenticationEngine.restoreSession();
 
     if (!authResult.success) {
+      DiagnosticTraceStore.append({
+        phase: 'TRUSTED_DEVICE_VERIFICATION',
+        result: 'FAILED',
+        data: { step: 'authenticationCompleted', success: false, source: 'restore', error: authResult.error }
+      });
       await rollbackSession();
       return Object.freeze({
         success: false,
@@ -171,7 +254,65 @@ export const AuthSession = {
          throw new Error('Session restored but no user was returned');
       }
 
+      DiagnosticTraceStore.append({
+        phase: 'TRUSTED_DEVICE_VERIFICATION',
+        result: 'SUCCESS',
+        data: {
+          step: 'authenticationCompleted',
+          success: true,
+          authUserId: authUser.id,
+          authenticationState: AuthenticationEngine.status().state,
+          source: 'restore'
+        }
+      });
+
+      const connectivityStatusAtAuth = ConnectivityEngine.status();
+      let nativeStatusAtAuth: any = null;
+      try {
+        nativeStatusAtAuth = await Network.getStatus();
+      } catch (e) {
+        nativeStatusAtAuth = { error: e instanceof Error ? e.message : String(e) };
+      }
+
+      DiagnosticTraceStore.append({
+        phase: 'CONNECTIVITY_LIFECYCLE',
+        result: 'SUCCESS',
+        data: {
+          step: 'connectivityStateAtAuthenticationCompletion',
+          timestamp: new Date().toISOString(),
+          engineInitialized: true,
+          engineState: connectivityStatusAtAuth.state,
+          engineIsOnline: connectivityStatusAtAuth.isOnline,
+          nativeConnected: nativeStatusAtAuth?.connected ?? null,
+          nativeConnectionType: nativeStatusAtAuth?.connectionType ?? null,
+          lastConnectivityEventAt: connectivityStatusAtAuth.lastConnectivityChangeAt ?? null
+        }
+      });
+
+      DiagnosticTraceStore.append({
+        phase: 'CONNECTIVITY_LIFECYCLE',
+        result: 'SUCCESS',
+        data: {
+          step: 'nativeNetworkStateAtAuthenticationCompletion',
+          timestamp: new Date().toISOString(),
+          nativeConnected: nativeStatusAtAuth?.connected ?? null,
+          nativeConnectionType: nativeStatusAtAuth?.connectionType ?? null
+        }
+      });
+
       const worker = mapToWorker(authUser);
+
+      DiagnosticTraceStore.append({
+        phase: 'TRUSTED_DEVICE_VERIFICATION',
+        result: 'SUCCESS',
+        data: {
+          step: 'workerResolutionCompleted',
+          authUserId: authUser.id,
+          workerId: worker.id,
+          workerEmail: worker.email,
+          workerResolutionSource: 'authUserMapping_restore'
+        }
+      });
 
       if (!worker.id || !worker.email || !worker.role || !worker.displayName) {
         throw new Error('Invalid worker mapping during restore');

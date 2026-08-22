@@ -21,7 +21,7 @@ function mapRowToRecord(row: any): TrustedDeviceRecord {
   return {
     id: row.id,
     workerId: row.worker_id,
-    deviceId: row.deviceId,
+    deviceId: row.device_id,
     manufacturer: row.manufacturer,
     model: row.model,
     platform: row.platform,
